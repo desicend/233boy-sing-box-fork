@@ -1,5 +1,83 @@
 #!/bin/bash
 
+author=233boy
+
+red='\e[31m'
+yellow='\e[33m'
+gray='\e[90m'
+green='\e[92m'
+blue='\e[94m'
+magenta='\e[95m'
+cyan='\e[96m'
+none='\e[0m'
+_red() { echo -e ${red}$@${none}; }
+_blue() { echo -e ${blue}$@${none}; }
+_cyan() { echo -e ${cyan}$@${none}; }
+_green() { echo -e ${green}$@${none}; }
+_yellow() { echo -e ${yellow}$@${none}; }
+_magenta() { echo -e ${magenta}$@${none}; }
+_red_bg() { echo -e "\e[41m$@${none}"; }
+
+is_err=$(_red_bg 错误!)
+is_warn=$(_red_bg 警告!)
+
+err() {
+    echo -e "\n$is_err $@\n" && exit 1
+}
+
+warn() {
+    echo -e "\n$is_warn $@\n"
+}
+
+[[ $EUID != 0 ]] && err "当前非 ${yellow}ROOT用户.${none}"
+
+cmd=$(type -P apt-get || type -P yum || type -P zypper || type -P apk)
+[[ ! $cmd ]] && err "此脚本仅支持 ${yellow}(Ubuntu or Debian or CentOS or SUSE or Alpine)${none}."
+
+is_systemd=$(type -P systemctl)
+is_openrc=$(type -P rc-service)
+[[ ! $is_systemd && ! $is_openrc ]] && {
+    err "此系统缺少 ${yellow}(systemctl 或 rc-service)${none}, 请安装 systemd 或确认 OpenRC 已启用."
+}
+
+is_core=sing-box
+is_core_name=sing-box
+is_core_dir=/etc/$is_core
+is_core_bin=$is_core_dir/bin/$is_core
+is_core_repo=SagerNet/$is_core
+is_conf_dir=$is_core_dir/conf
+is_log_dir=/var/log/$is_core
+is_sh_bin=/usr/local/bin/$is_core
+is_sh_dir=$is_core_dir/sh
+is_sh_repo=$author/$is_core
+is_config_json=$is_core_dir/config.json
+is_caddy_dir=/etc/caddy
+is_caddy_bin=$(type -P caddy)
+is_caddyfile=$is_caddy_dir/Caddyfile
+is_caddy_conf=$is_caddy_dir/conf.d
+
+load() {
+    . $is_sh_dir/src/$1
+}
+
+_wget() {
+    [[ $proxy ]] && export https_proxy=$proxy
+    wget --no-check-certificate $*
+}
+
+if [[ -x $is_core_bin ]]; then
+    is_core_ver=$($is_core_bin version 2>/dev/null | awk 'NR==1{print $3}')
+fi
+[[ -z $is_core_ver ]] && is_core_ver=unknown
+if [[ -d $is_conf_dir ]] && ls "$is_conf_dir"/*.json >/dev/null 2>&1; then
+    is_core_status=installed
+else
+    is_core_status=not-installed
+fi
+[[ -x $is_caddy_bin ]] && is_caddy=1
+
+export LC_ALL=C
+
 protocol_list=(
     TUIC
     Trojan
@@ -83,6 +161,16 @@ change_list=(
     "更改 SNI (serverName)"
     "更改伪装网站"
     "更改用户名 (Username)"
+    "更改节点名称"
+    "更改出站方式"
+    "更改入口地址"
+    "查看当前节点链接"
+)
+outbound_mode_list=(
+    "V6优先"
+    "V4优先"
+    "仅V4"
+    "仅V6"
 )
 servername_list=(
     www.amazon.com
@@ -243,6 +331,11 @@ ask() {
         is_ask_set=is_change_str
         is_opt_input_msg=$3
         ;;
+    set_outbound_mode)
+        is_tmp_list=("${outbound_mode_list[@]}")
+        is_opt_msg="\n请选择出站方式:\n"
+        is_ask_set=is_outbound_mode
+        ;;
     string)
         is_ask_set=$2
         is_opt_input_msg=$3
@@ -310,6 +403,99 @@ ask() {
         msg "输入${is_err}"
     done
     unset is_opt_msg is_opt_input_msg is_tmp_list is_ask_result is_default_arg is_emtpy_exit
+}
+
+meta_dir() {
+    echo "$is_conf_dir/.quan-meta"
+}
+
+meta_file() {
+    echo "$(meta_dir)/$1.meta.json"
+}
+
+meta_get() {
+    local f
+    f=$(meta_file "$1")
+    [[ -f "$f" ]] || return
+    jq -r "$2 // empty" "$f" 2>/dev/null
+}
+
+meta_set() {
+    local cfg=$1
+    local key=$2
+    local val=$3
+    local f
+    f=$(meta_file "$cfg")
+    mkdir -p "$(meta_dir)"
+    if [[ -f "$f" ]]; then
+        jq --arg v "$val" ".$key=\$v" "$f" >"$f.tmp" && mv -f "$f.tmp" "$f"
+    else
+        jq -n --arg v "$val" "{$key:\$v}" >"$f"
+    fi
+}
+
+meta_move() {
+    local old=$1
+    local new=$2
+    local of nf
+    of=$(meta_file "$old")
+    nf=$(meta_file "$new")
+    [[ -f "$of" ]] && mv -f "$of" "$nf"
+}
+
+meta_rm() {
+    local cfg=$1
+    local f
+    f=$(meta_file "$cfg")
+    [[ -f "$f" ]] && rm -f "$f"
+}
+
+outbound_mode_to_dns_strategy() {
+    case $1 in
+    "V6优先") echo prefer_ipv6 ;;
+    "V4优先") echo prefer_ipv4 ;;
+    "仅V4") echo ipv4_only ;;
+    "仅V6") echo ipv6_only ;;
+    *) return 1 ;;
+    esac
+}
+
+sync_runtime_dns_strategy() {
+    local mode=$1
+    local strategy tmp
+    strategy=$(outbound_mode_to_dns_strategy "$mode") || err "不支持的出站方式: $mode"
+    [[ -f "$is_config_json" ]] || create config.json
+    tmp="$is_config_json.tmp"
+    jq --arg s "$strategy" '.dns = (.dns // {}) | .dns.strategy = $s' "$is_config_json" >"$tmp" && mv -f "$tmp" "$is_config_json"
+}
+
+resolve_entry_addr_for_listen() {
+    local addr=$1
+    if [[ $(is_test domain "$addr") ]]; then
+        getent ahostsv4 "$addr" 2>/dev/null | awk 'NR==1{print $1; exit}' && return 0
+        getent ahostsv6 "$addr" 2>/dev/null | awk 'NR==1{print $1; exit}' && return 0
+        return 1
+    fi
+    echo "$addr"
+}
+
+sync_entry_addr_config() {
+    local cfg=$1
+    local entry=$2
+    local file="$is_conf_dir/$cfg"
+    local listen_addr tmp
+
+    [[ -f "$file" ]] || err "配置文件不存在: $cfg"
+
+    if jq -e '.inbounds[0].transport.headers.host? != null' "$file" >/dev/null 2>&1; then
+        tmp="$file.tmp"
+        jq --arg addr "$entry" '.inbounds[0].transport.headers.host = $addr' "$file" >"$tmp" && mv -f "$tmp" "$file"
+        return
+    fi
+
+    listen_addr=$(resolve_entry_addr_for_listen "$entry") || err "无法解析入口地址: $entry"
+    tmp="$file.tmp"
+    jq --arg addr "$listen_addr" '.inbounds[0].listen = $addr' "$file" >"$tmp" && mv -f "$tmp" "$file"
 }
 
 # create file
@@ -438,6 +624,18 @@ change() {
             ;;
         web | proxy-site)
             is_change_id=11
+            ;;
+        name | rename)
+            is_change_id=13
+            ;;
+        outbound | outbound-mode | mode)
+            is_change_id=14
+            ;;
+        entry | entry-addr | entry_addr | addr)
+            is_change_id=15
+            ;;
+        link | url)
+            is_change_id=16
             ;;
         *)
             [[ $is_try_change ]] && return
@@ -647,6 +845,41 @@ change() {
         ask string is_socks_user "请输入新用户名 (Username):"
         add $net
         ;;
+    13)
+        # rename config name (existing node only)
+        is_new_name=$3
+        [[ ! $is_new_name ]] && ask string is_new_name "请输入新节点名称(不含 .json):"
+        is_new_name=${is_new_name%.json}
+        [[ ! $is_new_name ]] && err "节点名称不能为空."
+        is_new_file="${is_new_name}.json"
+        [[ -f "$is_conf_dir/$is_new_file" ]] && err "节点名称已存在: $is_new_file"
+        [[ "$is_config_file" == "$is_new_file" ]] && err "新节点名称与当前名称一致."
+        cp -f "$is_conf_dir/$is_config_file" "$is_conf_dir/$is_new_file"
+        jq --arg t "$is_new_file" '.inbounds[0].tag=$t' "$is_conf_dir/$is_new_file" >"$is_conf_dir/$is_new_file.tmp" && mv -f "$is_conf_dir/$is_new_file.tmp" "$is_conf_dir/$is_new_file"
+        rm -f "$is_conf_dir/$is_config_file"
+        meta_move "$is_config_file" "$is_new_file"
+        is_config_file=$is_new_file
+        is_config_name=$is_new_file
+        manage restart &
+        msg "\n已更新节点名称为: $(_green $is_new_name)\n"
+        info
+        ;;
+    14)
+        ask set_outbound_mode
+        sync_runtime_dns_strategy "$is_outbound_mode"
+        msg "\n已更新出站方式为: $(_green $is_outbound_mode)\n"
+        ;;
+    15)
+        is_new_entry_addr=$3
+        [[ ! $is_new_entry_addr ]] && ask string is_new_entry_addr "请输入新的入口地址(IP或域名):"
+        sync_entry_addr_config "$is_config_file" "$is_new_entry_addr"
+        msg "\n已更新入口地址为: $(_green $is_new_entry_addr)\n"
+        info
+        ;;
+    16)
+        # view current share link
+        url_qr url
+        ;;
     esac
 }
 
@@ -663,6 +896,7 @@ del() {
             pause
         fi
         rm -rf $is_conf_dir/"$is_config_file"
+        meta_rm "$is_config_file"
         [[ ! $is_new_json ]] && manage restart &
         [[ ! $is_no_del_msg ]] && _green "\n已删除: $is_config_file\n"
 
@@ -1084,6 +1318,7 @@ get() {
     case $1 in
     addr)
         is_addr=$host
+        [[ ! $is_addr && $is_listen_addr && $is_listen_addr != "::" && $is_listen_addr != "0.0.0.0" ]] && is_addr=$is_listen_addr
         [[ ! $is_addr ]] && {
             get_ip
             is_addr=$ip
@@ -1111,9 +1346,9 @@ get() {
         get file $2
         if [[ $is_config_file ]]; then
             is_json_str=$(cat $is_conf_dir/"$is_config_file" | sed s#//.*##)
-            is_json_data=$(jq '(.inbounds[0]|.type,.listen_port,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag)' <<<$is_json_str)
+            is_json_data=$(jq '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag)' <<<$is_json_str)
             [[ $? != 0 ]] && err "无法读取此文件: $is_config_file"
-            is_up_var_set=(null is_protocol port uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key)
+            is_up_var_set=(null is_protocol port is_listen_addr uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key)
             [[ $is_debug ]] && msg "\n------------- debug: $is_config_file -------------"
             i=0
             for v in $(sed 's/""/null/g;s/"//g' <<<"$is_json_data"); do
@@ -1365,7 +1600,7 @@ info() {
     ws | tcp | h2 | quic | http*)
         if [[ $host ]]; then
             is_color=45
-            is_can_change=(0 1 2 3 5)
+            is_can_change=(0 1 2 3 5 13 14 15 16)
             is_info_show=(0 1 2 3 4 6 7 8)
             [[ $is_protocol == 'vmess' ]] && {
                 is_vmess_url=$(jq -c '{v:2,ps:'\"233boy-$net-$host\"',add:'\"$is_addr\"',port:'\"$is_https_port\"',id:'\"$uuid\"',aid:"0",net:'\"$net\"',host:'\"$host\"',path:'\"$path\"',tls:'\"tls\"'}' <<<{})
@@ -1374,7 +1609,7 @@ info() {
                 [[ $is_protocol == "trojan" ]] && {
                     uuid=$password
                     # is_info_str=($is_protocol $is_addr $is_https_port $password $net $host $path 'tls')
-                    is_can_change=(0 1 2 3 4)
+                    is_can_change=(0 1 2 3 4 13 14 15 16)
                     is_info_show=(0 1 2 10 4 6 7 8)
                 }
                 is_url="$is_protocol://$uuid@$host:$is_https_port?encryption=none&security=tls&type=$net&host=$host&path=$path#233boy-$net-$host"
@@ -1383,7 +1618,7 @@ info() {
             is_info_str=($is_protocol $is_addr $is_https_port $uuid $net $host $path 'tls')
         else
             is_type=none
-            is_can_change=(0 1 5)
+            is_can_change=(0 1 5 13 14 15 16)
             is_info_show=(0 1 2 3 4)
             is_info_str=($is_protocol $is_addr $port $uuid $net)
             [[ $net == "http" ]] && {
@@ -1404,34 +1639,34 @@ info() {
         fi
         ;;
     ss)
-        is_can_change=(0 1 4 6)
+        is_can_change=(0 1 4 6 13 14 15 16)
         is_info_show=(0 1 2 10 11)
         is_url="ss://$(echo -n ${ss_method}:${ss_password} | base64 -w 0)@${is_addr}:${port}#233boy-$net-${is_addr}"
         is_info_str=($is_protocol $is_addr $port $ss_password $ss_method)
         ;;
     trojan)
         is_insecure=1
-        is_can_change=(0 1 4)
+        is_can_change=(0 1 4 13 14 15 16)
         is_info_show=(0 1 2 10 4 8 20)
         is_url="$is_protocol://$password@$is_addr:$port?type=tcp&security=tls&allowInsecure=1#233boy-$net-$is_addr"
         is_info_str=($is_protocol $is_addr $port $password tcp tls true)
         ;;
     hy*)
-        is_can_change=(0 1 4)
+        is_can_change=(0 1 4 13 14 15 16)
         is_info_show=(0 1 2 10 8 9 20)
         is_url="$is_protocol://$password@$is_addr:$port?alpn=h3&insecure=1#233boy-$net-$is_addr"
         is_info_str=($is_protocol $is_addr $port $password tls h3 true)
         ;;
     tuic)
         is_insecure=1
-        is_can_change=(0 1 4 5)
+        is_can_change=(0 1 4 5 13 14 15 16)
         is_info_show=(0 1 2 3 10 8 9 20 21)
         is_url="$is_protocol://$uuid:$password@$is_addr:$port?alpn=h3&allow_insecure=1&congestion_control=bbr#233boy-$net-$is_addr"
         is_info_str=($is_protocol $is_addr $port $uuid $password tls h3 true bbr)
         ;;
     reality)
         is_color=41
-        is_can_change=(0 1 5 9 10)
+        is_can_change=(0 1 5 9 10 13 14 15 16)
         is_info_show=(0 1 2 3 15 4 8 16 17 18)
         is_flow=xtls-rprx-vision
         is_net_type=tcp
@@ -1444,7 +1679,7 @@ info() {
         is_url="$is_protocol://$uuid@$is_addr:$port?encryption=none&security=reality&flow=$is_flow&type=$is_net_type&sni=$is_servername&pbk=$is_public_key&fp=chrome#233boy-$net-$is_addr"
         ;;
     anytls)
-        is_can_change=(0 1 4)
+        is_can_change=(0 1 4 13 14 15 16)
         if [[ $is_anytls_domain ]]; then
             is_info_show=(0 1 2 10 8)
             is_info_str=($is_protocol $is_anytls_domain $port $password tls)
@@ -1457,12 +1692,12 @@ info() {
         fi
         ;;
     direct)
-        is_can_change=(0 1 7 8)
+        is_can_change=(0 1 7 8 13 14 15 16)
         is_info_show=(0 1 2 13 14)
         is_info_str=($is_protocol $is_addr $port $door_addr $door_port)
         ;;
     socks)
-        is_can_change=(0 1 12 4)
+        is_can_change=(0 1 12 4 13 14 15 16)
         is_info_show=(0 1 2 19 10)
         is_info_str=($is_protocol $is_addr $port $is_socks_user $is_socks_pass)
         is_url="socks://$(echo -n ${is_socks_user}:${is_socks_pass} | base64 -w 0)@${is_addr}:${port}#233boy-$net-${is_addr}"
@@ -1663,6 +1898,10 @@ is_main_menu() {
 
 # check prefer args, if not exist prefer args and show main menu
 main() {
+    [[ ! $1 ]] && {
+        is_main_menu
+        return
+    }
     case $1 in
     a | add | gen | no-auto-tls)
         [[ $1 == 'gen' ]] && is_gen=1
@@ -1825,3 +2064,6 @@ main() {
         ;;
     esac
 }
+
+
+main "$@"
