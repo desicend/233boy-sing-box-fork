@@ -69,7 +69,7 @@ if [[ -x $is_core_bin ]]; then
     is_core_ver=$($is_core_bin version 2>/dev/null | awk 'NR==1{print $3}')
 fi
 [[ -z $is_core_ver ]] && is_core_ver=unknown
-if [[ -d $is_conf_dir ]] && ls "$is_conf_dir"/*.json >/dev/null 2>&1; then
+if [[ -d $is_conf_dir ]] && compgen -G "$is_conf_dir/*.json" >/dev/null; then
     is_core_status=installed
 else
     is_core_status=not-installed
@@ -450,6 +450,17 @@ meta_rm() {
     [[ -f "$f" ]] && rm -f "$f"
 }
 
+node_name_for_link() {
+    local cfg=$1
+    local name
+    name=$(meta_get "$cfg" '.node_name')
+    [[ $name ]] && {
+        echo "$name"
+        return
+    }
+    echo "${cfg%.json}"
+}
+
 outbound_mode_to_dns_strategy() {
     case $1 in
     "V6优先") echo prefer_ipv6 ;;
@@ -469,6 +480,34 @@ sync_runtime_dns_strategy() {
     jq --arg s "$strategy" '.dns = (.dns // {}) | .dns.strategy = $s' "$is_config_json" >"$tmp" && mv -f "$tmp" "$is_config_json"
 }
 
+is_valid_ipv4_addr() {
+    local addr=$1
+    [[ $addr =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS='.' read -r o1 o2 o3 o4 <<<"$addr"
+    for o in "$o1" "$o2" "$o3" "$o4"; do
+        [[ $o -le 255 ]] || return 1
+    done
+    return 0
+}
+
+is_valid_entry_addr() {
+    local addr=$1
+    [[ $(is_test domain "$addr") ]] && return 0
+    is_valid_ipv4_addr "$addr" && return 0
+    [[ $addr == *:* ]] && getent ahostsv6 "$addr" >/dev/null 2>&1 && return 0
+    return 1
+}
+
+get_public_entry_addr() {
+    get_ip
+    [[ $ip ]] || err "无法获取公网 IP"
+    echo "$ip"
+}
+
+random_node_name() {
+    tr -dc 'A-Za-z0-9' </dev/urandom | head -c 8
+}
+
 resolve_entry_addr_for_listen() {
     local addr=$1
     if [[ $(is_test domain "$addr") ]]; then
@@ -483,19 +522,26 @@ sync_entry_addr_config() {
     local cfg=$1
     local entry=$2
     local file="$is_conf_dir/$cfg"
-    local listen_addr tmp
+    local listen_addr tmp normalized_entry
 
     [[ -f "$file" ]] || err "配置文件不存在: $cfg"
 
+    normalized_entry=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <<<"$entry")
+    if [[ ! $normalized_entry ]] || ! is_valid_entry_addr "$normalized_entry"; then
+        normalized_entry=$(get_public_entry_addr)
+    fi
+
     if jq -e '.inbounds[0].transport.headers.host? != null' "$file" >/dev/null 2>&1; then
         tmp="$file.tmp"
-        jq --arg addr "$entry" '.inbounds[0].transport.headers.host = $addr' "$file" >"$tmp" && mv -f "$tmp" "$file"
+        jq --arg addr "$normalized_entry" '.inbounds[0].transport.headers.host = $addr' "$file" >"$tmp" && mv -f "$tmp" "$file"
+        echo "$normalized_entry"
         return
     fi
 
-    listen_addr=$(resolve_entry_addr_for_listen "$entry") || err "无法解析入口地址: $entry"
+    listen_addr=$(resolve_entry_addr_for_listen "$normalized_entry") || listen_addr=$(get_public_entry_addr)
     tmp="$file.tmp"
     jq --arg addr "$listen_addr" '.inbounds[0].listen = $addr' "$file" >"$tmp" && mv -f "$tmp" "$file"
+    echo "$normalized_entry"
 }
 
 # create file
@@ -514,6 +560,9 @@ create() {
             is_config_name=$2-${is_anytls_domain}.json
         else
             is_config_name=$2-${port}.json
+        fi
+        if [[ $is_custom_node_name ]]; then
+            is_config_name=${is_custom_node_name}.json
         fi
         is_json_file=$is_conf_dir/$is_config_name
         # get json
@@ -846,21 +895,14 @@ change() {
         add $net
         ;;
     13)
-        # rename config name (existing node only)
+        # update share link node name (does not rename json file)
         is_new_name=$3
-        [[ ! $is_new_name ]] && ask string is_new_name "请输入新节点名称(不含 .json):"
+        [[ ! $is_new_name ]] && ask string is_new_name "请输入新节点名称:"
         is_new_name=${is_new_name%.json}
         [[ ! $is_new_name ]] && err "节点名称不能为空."
-        is_new_file="${is_new_name}.json"
-        [[ -f "$is_conf_dir/$is_new_file" ]] && err "节点名称已存在: $is_new_file"
-        [[ "$is_config_file" == "$is_new_file" ]] && err "新节点名称与当前名称一致."
-        cp -f "$is_conf_dir/$is_config_file" "$is_conf_dir/$is_new_file"
-        jq --arg t "$is_new_file" '.inbounds[0].tag=$t' "$is_conf_dir/$is_new_file" >"$is_conf_dir/$is_new_file.tmp" && mv -f "$is_conf_dir/$is_new_file.tmp" "$is_conf_dir/$is_new_file"
-        rm -f "$is_conf_dir/$is_config_file"
-        meta_move "$is_config_file" "$is_new_file"
-        is_config_file=$is_new_file
-        is_config_name=$is_new_file
-        manage restart &
+        is_old_name=$(node_name_for_link "$is_config_file")
+        [[ "$is_old_name" == "$is_new_name" ]] && err "新节点名称与当前名称一致."
+        meta_set "$is_config_file" node_name "$is_new_name"
         msg "\n已更新节点名称为: $(_green $is_new_name)\n"
         info
         ;;
@@ -871,8 +913,11 @@ change() {
         ;;
     15)
         is_new_entry_addr=$3
-        [[ ! $is_new_entry_addr ]] && ask string is_new_entry_addr "请输入新的入口地址(IP或域名):"
-        sync_entry_addr_config "$is_config_file" "$is_new_entry_addr"
+        if [[ -z $is_new_entry_addr ]]; then
+            echo -ne "请输入新的入口地址(IP或域名):"
+            read is_new_entry_addr
+        fi
+        is_new_entry_addr=$(sync_entry_addr_config "$is_config_file" "$is_new_entry_addr")
         msg "\n已更新入口地址为: $(_green $is_new_entry_addr)\n"
         info
         ;;
@@ -1305,6 +1350,17 @@ add() {
         get install-caddy
     fi
 
+    if [[ $is_main_start && ! $is_change && ! $is_gen ]]; then
+        echo -ne "请输入节点名称(直接回车随机8位):"
+        read is_custom_node_name
+        is_custom_node_name=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <<<"$is_custom_node_name")
+        is_custom_node_name=${is_custom_node_name%.json}
+        [[ ! $is_custom_node_name ]] && is_custom_node_name=$(random_node_name)
+        while [[ -f "$is_conf_dir/${is_custom_node_name}.json" ]]; do
+            is_custom_node_name=$(random_node_name)
+        done
+    fi
+
     # create json
     create server $is_new_protocol
 
@@ -1596,7 +1652,7 @@ info() {
     fi
     # is_color=$(shuf -i 41-45 -n1)
     is_color=44
-    is_node_name=${is_config_name%.json}
+    is_node_name=$(node_name_for_link "$is_config_file")
     case $net in
     ws | tcp | h2 | quic | http*)
         if [[ $host ]]; then
@@ -1715,9 +1771,6 @@ info() {
         fi
         msg "$a $tt= \e[${is_color}m${is_info_str[$i]}\e[0m"
     done
-    if [[ $is_new_install ]]; then
-        warn "首次安装请查看脚本帮助文档: $(msg_ul https://233boy.com/$is_core/$is_core-script/)"
-    fi
     if [[ $is_url ]]; then
         msg "------------- ${info_list[12]} -------------"
         msg "\e[4;${is_color}m${is_url}\e[0m"
@@ -1738,13 +1791,6 @@ info() {
 footer_msg() {
     [[ $is_core_stop && ! $is_new_json ]] && warn "$is_core_name 当前处于停止状态."
     [[ $is_caddy_stop && $host ]] && warn "Caddy 当前处于停止状态."
-    ####### 要点13脸吗只会改我链接的小人 #######
-    unset c n m s b
-    msg "------------- END -------------"
-    msg "关注(tg): $(msg_ul https://t.me/tg2333)"
-    msg "文档(doc): $(msg_ul https://233boy.com/$is_core/$is_core-script/)"
-    msg "推广(ads): 机场推荐($is_core_name services): $(msg_ul https://g${c}e${n}t${m}j${s}m${b}s.com/)\n"
-    ####### 要点13脸吗只会改我链接的小人 #######
 }
 
 # URL or qrcode

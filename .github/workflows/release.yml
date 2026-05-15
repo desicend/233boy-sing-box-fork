@@ -15,15 +15,15 @@ jobs:
           fetch-depth: 0
       - name: get ver
         run: |
-          echo "$(cat *.sh | grep is_sh_ver=)" >> $GITHUB_ENV
-          echo "old=$(git tag | tail -n1)" >> $GITHUB_ENV
+          echo "$(grep -E '^is_sh_ver=' sing-box.sh)" >> $GITHUB_ENV
+          echo "old=$(git tag --sort=-v:refname | head -n1)" >> $GITHUB_ENV
       # - name: test
       #   if: env.is_sh_ver == env.old 
       #   run: |
       #     echo not found new version.
       #     exit 1
       - name: tar
-        run: tar zcvf code.tar.gz ./*
+        run: tar zcvf code.tar.gz install.sh core.sh sing-box.sh src LICENSE README.md
       - name: release
         uses: softprops/action-gh-release@v1
         with:

@@ -2,15 +2,15 @@ get_latest_version() {
     case $1 in
     core)
         name=$is_core_name
-        url="https://api.github.com/repos/${is_core_repo}/releases/latest?v=$RANDOM"
+        url="https://api.github.com/repos/${is_core_repo}/releases/latest"
         ;;
     sh)
         name="$is_core_name 脚本"
-        url="https://api.github.com/repos/$is_sh_repo/releases/latest?v=$RANDOM"
+        url="https://api.github.com/repos/$is_sh_repo/releases/latest"
         ;;
     caddy)
         name="Caddy"
-        url="https://api.github.com/repos/$is_caddy_repo/releases/latest?v=$RANDOM"
+        url="https://api.github.com/repos/$is_caddy_repo/releases/latest"
         ;;
     esac
     latest_ver=$(_wget -qO- "$url" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
@@ -23,11 +23,11 @@ download() {
     latest_ver=$2
     [[ ! $latest_ver ]] && get_latest_version $1
     # tmp dir
-    tmpdir=$(mktemp -u)
+    tmpdir=$(mktemp -d 2>/dev/null)
     [[ ! $tmpdir ]] && {
         tmpdir=/tmp/tmp-$RANDOM
+        mkdir -p "$tmpdir"
     }
-    mkdir -p $tmpdir
     case $1 in
     core)
         name=$is_core_name

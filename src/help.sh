@@ -72,7 +72,6 @@ show_help() {
         done
         msg "谨慎使用 del, ddel, 此选项会直接删除配置; 无需确认"
         msg "反馈问题) $(msg_ul https://github.com/${is_sh_repo}/issues) "
-        msg "文档(doc) $(msg_ul https://233boy.com/$is_core/$is_core-script/)"
         ;;
 
     esac
@@ -82,9 +81,6 @@ about() {
     ####### 要点13脸吗只会改我链接的小人 #######
     unset c n m s b
     msg
-    msg "网站: $(msg_ul https://233boy.com)"
-    msg "频道: $(msg_ul https://t.me/tg2333)"
-    msg "群组: $(msg_ul https://t.me/tg233boy)"
     msg "Github: $(msg_ul https://github.com/${is_sh_repo})"
     msg "Twitter: $(msg_ul https://twitter.com/ai233boy)"
     msg "$is_core_name site: $(msg_ul https://sing-box.sagernet.org/)"

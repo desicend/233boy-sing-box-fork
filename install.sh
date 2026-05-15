@@ -86,9 +86,10 @@ tmp_var_lists=(
 )
 
 # tmp dir
-tmpdir=$(mktemp -u)
+tmpdir=$(mktemp -d 2>/dev/null)
 [[ ! $tmpdir ]] && {
     tmpdir=/tmp/tmp-$RANDOM
+    mkdir -p "$tmpdir"
 }
 
 # set up var
@@ -421,8 +422,8 @@ main() {
     fi
 
     # add alias
-    echo "alias sb=$is_sh_bin" >>/root/.bashrc
-    echo "alias $is_core=$is_sh_bin" >>/root/.bashrc
+    grep -qxF "alias sb=$is_sh_bin" /root/.bashrc || echo "alias sb=$is_sh_bin" >>/root/.bashrc
+    grep -qxF "alias $is_core=$is_sh_bin" /root/.bashrc || echo "alias $is_core=$is_sh_bin" >>/root/.bashrc
 
     # core command
     ln -sf $is_sh_dir/$is_core.sh $is_sh_bin
