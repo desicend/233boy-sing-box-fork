@@ -1652,7 +1652,7 @@ info() {
     fi
     # is_color=$(shuf -i 41-45 -n1)
     is_color=44
-    is_node_name=$(node_name_for_link "$is_config_file")
+    is_node_name=$(node_name_for_link "${is_config_file:-$is_config_name}")
     case $net in
     ws | tcp | h2 | quic | http*)
         if [[ $host ]]; then
