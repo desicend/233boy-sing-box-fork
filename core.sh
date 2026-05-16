@@ -234,7 +234,7 @@ get_port() {
         if [[ $is_count -ge 233 ]]; then
             err "自动获取可用端口失败次数达到 233 次, 请检查端口占用情况."
         fi
-        tmp_port=$(shuf -i 445-65535 -n 1)
+        tmp_port=$(shuf -i 20000-65535 -n 1)
         [[ ! $(is_test port_used $tmp_port) && $tmp_port != $port ]] && break
     done
 }
@@ -1295,20 +1295,36 @@ add() {
         if [[ $is_main_start ]]; then
 
             # set port
-            [[ ! $port ]] && ask string port "请输入端口:"
+            [[ ! $port ]] && {
+                get_port
+                is_default_arg=$tmp_port
+                ask string port "请输入端口(直接回车随机):"
+            }
 
             case ${is_new_protocol,,} in
             socks)
                 # set user
                 [[ ! $is_socks_user ]] && ask string is_socks_user "请设置用户名:"
                 # set password
-                [[ ! $is_socks_pass ]] && ask string is_socks_pass "请设置密码:"
+                [[ ! $is_socks_pass ]] && {
+                    [[ ! $tmp_uuid ]] && get_uuid
+                    is_default_arg=$tmp_uuid
+                    ask string is_socks_pass "请设置密码(直接回车随机):"
+                }
                 ;;
             shadowsocks)
                 # set method
                 [[ ! $ss_method ]] && ask set_ss_method
                 # set password
-                [[ ! $ss_password ]] && ask string ss_password "请设置密码:"
+                [[ ! $ss_password ]] && {
+                    if [[ $(grep 2022 <<<$ss_method) ]]; then
+                        is_default_arg=$(get ss2022)
+                    else
+                        [[ ! $tmp_uuid ]] && get_uuid
+                        is_default_arg=$tmp_uuid
+                    fi
+                    ask string ss_password "请设置密码(直接回车随机):"
+                }
                 ;;
             esac
 
