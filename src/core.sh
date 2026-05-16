@@ -580,7 +580,7 @@ create() {
         # del old file
         [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
         # save json to file
-        cat <<<$is_new_json >$is_json_file
+        cat <<<$is_new_json >"$is_json_file"
         if [[ $is_new_install ]]; then
             # config.json
             create config.json
@@ -837,7 +837,7 @@ change() {
                 err "Private key 和 Public key 不能一样."
             fi
             is_tmp_json=$is_conf_dir/$is_config_file-$uuid
-            cp -f $is_conf_dir/$is_config_file $is_tmp_json
+            cp -f "$is_conf_dir/$is_config_file" "$is_tmp_json"
             sed -i s#$is_private_key #$is_new_private_key# $is_tmp_json
             $is_core_bin check -c $is_tmp_json &>/dev/null
             if [[ $? != 0 ]]; then
@@ -850,7 +850,7 @@ change() {
                 is_key_err=1
                 is_key_err_msg+="Public key 无法通过测试."
             fi
-            rm $is_tmp_json
+            rm "$is_tmp_json"
             [[ $is_key_err ]] && err $is_key_err_msg
             is_private_key=$is_new_private_key
             is_public_key=$is_new_public_key
@@ -1867,7 +1867,13 @@ update() {
         err "无法识别 ($1), 请使用: $is_core update [core | sh | caddy] [ver]"
         ;;
     esac
-    [[ $2 ]] && is_new_ver=v${2#v}
+    if [[ $2 ]]; then
+        if [[ $is_update_name == 'sh' ]]; then
+            is_new_ver=$2
+        else
+            is_new_ver=v${2#v}
+        fi
+    fi
     [[ $is_run_ver == $is_new_ver ]] && {
         msg "\n自定义版本和当前 $is_show_name 版本一样, 无需更新.\n"
         exit
