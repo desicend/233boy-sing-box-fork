@@ -364,7 +364,7 @@ ask() {
         echo -ne $is_opt_input_msg
         read REPLY
         [[ ! $REPLY && $is_emtpy_exit ]] && exit
-        [[ ! $REPLY && $is_default_arg ]] && export $is_ask_set=$is_default_arg && break
+        [[ ! $REPLY && $is_default_arg ]] && export "$is_ask_set=$is_default_arg" && break
         [[ "$REPLY" == "${is_str}2${is_get}3${is_opt}3" && $is_ask_set == 'is_main_pick' ]] && {
             msg "\n${is_get}2${is_str}3${is_msg}3b${is_tmp}o${is_opt}y\n" && exit
         }
@@ -394,7 +394,7 @@ ask() {
                 msg "请输入 (y)"
                 continue
             }
-            [[ $REPLY ]] && export $is_ask_set=$REPLY && msg "使用: ${!is_ask_set}" && break
+            [[ $REPLY ]] && export "$is_ask_set=$REPLY" && msg "使用: ${!is_ask_set}" && break
         else
             [[ $(is_test number "$REPLY") ]] && is_ask_result=${is_tmp_list[$REPLY - 1]}
             [[ $is_ask_result ]] && export $is_ask_set="$is_ask_result" && msg "选择: ${!is_ask_set}" && break
