@@ -712,12 +712,12 @@ change() {
     }
     case $is_change_id in
     full)
-        add $net ${@:3}
+        add "$net" "${@:3}"
         ;;
     0)
         # new protocol
         is_set_new_protocol=1
-        add ${@:3}
+        add "${@:3}"
         ;;
     1)
         # new port
@@ -1394,8 +1394,16 @@ get() {
     file)
         is_file_str=$2
         [[ ! $is_file_str ]] && is_file_str='.json$'
-        # is_all_json=("$(ls $is_conf_dir | grep -E $is_file_str)")
-        readarray -t is_all_json <<<"$(ls $is_conf_dir | grep -E -i "$is_file_str" | sed '/dynamic-port-.*-link/d' | head -233)" # limit max 233 lines for show.
+        is_all_json=()
+        shopt -s nullglob
+        for is_json_file in "$is_conf_dir"/*.json; do
+            is_json_name=${is_json_file##*/}
+            [[ $is_json_name =~ dynamic-port-.*-link ]] && continue
+            grep -E -i -q -- "$is_file_str" <<<"$is_json_name" || continue
+            is_all_json+=("$is_json_name")
+            [[ ${#is_all_json[@]} -ge 233 ]] && break
+        done
+        shopt -u nullglob
         [[ ! $is_all_json ]] && err "无法找到相关的配置文件: $2"
         [[ ${#is_all_json[@]} -eq 1 ]] && is_config_file=$is_all_json && is_auto_get_config=1
         [[ ! $is_config_file ]] && {
@@ -1407,15 +1415,18 @@ get() {
         get file $2
         if [[ $is_config_file ]]; then
             is_json_str=$(cat $is_conf_dir/"$is_config_file" | sed s#//.*##)
-            is_json_data=$(jq '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag)' <<<$is_json_str)
+            is_json_data=$(jq -r '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag)' <<<$is_json_str)
             [[ $? != 0 ]] && err "无法读取此文件: $is_config_file"
             is_up_var_set=(null is_protocol port is_listen_addr uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key)
             [[ $is_debug ]] && msg "\n------------- debug: $is_config_file -------------"
+            mapfile -t is_json_data_list <<<"$is_json_data"
             i=0
-            for v in $(sed 's/""/null/g;s/"//g' <<<"$is_json_data"); do
+            for v in "${is_json_data_list[@]}"; do
                 ((i++))
+                [[ ! $v ]] && v=null
                 [[ $is_debug ]] && msg "$i-${is_up_var_set[$i]}: $v"
-                export ${is_up_var_set[$i]}="${v}"
+                printf -v "${is_up_var_set[$i]}" '%s' "$v"
+                export "${is_up_var_set[$i]}"
             done
             for v in ${is_up_var_set[@]}; do
                 [[ ${!v} == 'null' ]] && unset $v
@@ -1657,7 +1668,7 @@ info() {
     fi
     # is_color=$(shuf -i 41-45 -n1)
     is_color=44
-    is_node_name=$(node_name_for_link "${is_config_file:-$is_config_name}")
+    is_node_name=$(node_name_for_link "$is_config_file")
     case $net in
     ws | tcp | h2 | quic | http*)
         if [[ $host ]]; then
@@ -2001,10 +2012,14 @@ main() {
         fix-all)
             is_dont_auto_exit=1
             msg
-            for v in $(ls $is_conf_dir | grep .json$ | sed '/dynamic-port-.*-link/d'); do
+            shopt -s nullglob
+            for is_json_file in "$is_conf_dir"/*.json; do
+                v=${is_json_file##*/}
+                [[ $v =~ dynamic-port-.*-link ]] && continue
                 msg "fix: $v"
-                change $v full
+                change "$v" full
             done
+            shopt -u nullglob
             _green "\nfix 完成.\n"
             ;;
         *)
