@@ -552,18 +552,9 @@ create() {
         get new
         # listen
         is_listen='listen: "::"'
-        # file name
-        if [[ $host ]]; then
-            is_config_name=$2-${host}.json
-            is_listen='listen: "127.0.0.1"'
-        elif [[ $is_anytls_domain ]]; then
-            is_config_name=$2-${is_anytls_domain}.json
-        else
-            is_config_name=$2-${port}.json
-        fi
-        if [[ $is_custom_node_name ]]; then
-            is_config_name=${is_custom_node_name}.json
-        fi
+        # file name: protocol + port
+        is_config_name=${2}-${port}.json
+        [[ $host ]] && is_listen='listen: "127.0.0.1"'
         is_json_file=$is_conf_dir/$is_config_name
         # get json
         [[ $is_change || ! $json_str ]] && get protocol $2
@@ -1372,13 +1363,11 @@ add() {
         is_custom_node_name=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <<<"$is_custom_node_name")
         is_custom_node_name=${is_custom_node_name%.json}
         [[ ! $is_custom_node_name ]] && is_custom_node_name=$(random_node_name)
-        while [[ -f "$is_conf_dir/${is_custom_node_name}.json" ]]; do
-            is_custom_node_name=$(random_node_name)
-        done
     fi
 
     # create json
     create server $is_new_protocol
+    [[ $is_custom_node_name && $is_config_name ]] && meta_set "$is_config_name" node_name "$is_custom_node_name"
 
     # show config info.
     info
