@@ -41,6 +41,12 @@
 
 脚本的参数非常高效率并且超级易用，请掌握参数的使用
 
+# 一键安装
+
+```bash
+bash <(wget -qO- -o- https://github.com/desicend/233boy-sing-box-fork/raw/main/install.sh)
+```
+
 # 文档
 
 安装及使用：https://233boy.com/sing-box/sing-box-script/
