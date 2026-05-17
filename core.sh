@@ -534,6 +534,7 @@ sync_entry_addr_config() {
     if jq -e '.inbounds[0].transport.headers.host? != null' "$file" >/dev/null 2>&1; then
         tmp="$file.tmp"
         jq --arg addr "$normalized_entry" '.inbounds[0].transport.headers.host = $addr' "$file" >"$tmp" && mv -f "$tmp" "$file"
+        meta_set "$cfg" entry_addr "$normalized_entry"
         echo "$normalized_entry"
         return
     fi
@@ -541,6 +542,7 @@ sync_entry_addr_config() {
     listen_addr=$(resolve_entry_addr_for_listen "$normalized_entry") || listen_addr=$(get_public_entry_addr)
     tmp="$file.tmp"
     jq --arg addr "$listen_addr" '.inbounds[0].listen = $addr' "$file" >"$tmp" && mv -f "$tmp" "$file"
+    meta_set "$cfg" entry_addr "$normalized_entry"
     echo "$normalized_entry"
 }
 
@@ -1379,6 +1381,7 @@ get() {
     case $1 in
     addr)
         is_addr=$host
+        [[ ! $is_addr && $is_config_file ]] && is_addr=$(meta_get "$is_config_file" '.entry_addr')
         [[ ! $is_addr && $is_listen_addr && $is_listen_addr != "::" && $is_listen_addr != "0.0.0.0" ]] && is_addr=$is_listen_addr
         [[ ! $is_addr ]] && {
             get_ip
