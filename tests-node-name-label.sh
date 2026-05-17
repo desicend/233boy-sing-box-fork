@@ -10,6 +10,7 @@ cleanup() {
 trap cleanup EXIT
 
 source "$repo_root/core.sh"
+manage() { :; }
 
 is_conf_dir="$workdir/conf"
 is_config_json="$workdir/config.json"
@@ -79,4 +80,48 @@ grep -q 'is_node_name=$(node_name_for_link "${is_config_file:-$is_config_name}")
   exit 1
 }
 
-echo "PASS: node rename updates link label source without renaming json file"
+cat > "$is_conf_dir/VLESS-REALITY-12345.json" <<'EOF'
+{
+  "inbounds": [
+    {
+      "tag": "VLESS-REALITY-12345.json",
+      "type": "vless",
+      "listen": "0.0.0.0",
+      "listen_port": 12345,
+      "users": [{"uuid": "11111111-1111-1111-1111-111111111111"}],
+      "tls": {
+        "server_name": "old.example.com",
+        "reality": {"private_key": "abcdefghijklmnopqrstuvwxyz1234567890abcd"}
+      }
+    }
+  ],
+  "outbounds": [
+    {"type": "direct"},
+    {"tag": "public_key_abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"}
+  ]
+}
+EOF
+
+jq -n '{node_name:"MyNode"}' > "$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
+change VLESS-REALITY-12345.json sni new.example.com >/dev/null
+
+sni_meta_file="$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
+[[ -f "$sni_meta_file" ]] || {
+  echo "FAIL: node label metadata missing after change sni"
+  exit 1
+}
+
+jq -e '.node_name == "MyNode"' "$sni_meta_file" >/dev/null || {
+  echo "FAIL: change sni should preserve custom node label"
+  cat "$sni_meta_file"
+  exit 1
+}
+
+sni_label=$(node_name_for_link "VLESS-REALITY-12345.json")
+[[ "$sni_label" == "MyNode" ]] || {
+  echo "FAIL: node_name_for_link should keep MyNode after change sni"
+  echo "sni_label=${sni_label:-<empty>}"
+  exit 1
+}
+
+echo "PASS: node rename and change sni preserve link label metadata"

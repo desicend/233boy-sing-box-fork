@@ -550,6 +550,7 @@ sync_entry_addr_config() {
 create() {
     case $1 in
     server)
+        local preserved_node_name
         is_tls=none
         get new
         # listen
@@ -570,10 +571,12 @@ create() {
             msg
             return
         }
+        [[ $is_change && $is_config_file ]] && preserved_node_name=$(meta_get "$is_config_file" '.node_name')
         # del old file
         [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
         # save json to file
         cat <<<$is_new_json >"$is_json_file"
+        [[ $preserved_node_name && $is_config_name ]] && meta_set "$is_config_name" node_name "$preserved_node_name"
         if [[ $is_new_install ]]; then
             # config.json
             create config.json
