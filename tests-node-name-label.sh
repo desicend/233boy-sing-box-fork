@@ -74,8 +74,8 @@ new_label=$(node_name_for_link "$is_config_file")
   exit 1
 }
 
-grep -q 'is_node_name=$(node_name_for_link "$is_config_file")' "$repo_root/core.sh" || {
-  echo "FAIL: core.sh no longer wires URL node label to node_name_for_link"
+grep -q 'is_node_name=$(node_name_for_link "${is_config_file:-$is_config_name}")' "$repo_root/core.sh" || {
+  echo "FAIL: core.sh no longer wires URL node label with config fallback"
   exit 1
 }
 
