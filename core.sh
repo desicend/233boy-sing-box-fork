@@ -477,7 +477,7 @@ sync_runtime_dns_strategy() {
     strategy=$(outbound_mode_to_dns_strategy "$mode") || err "不支持的出站方式: $mode"
     [[ -f "$is_config_json" ]] || create config.json
     tmp="$is_config_json.tmp"
-    jq --arg s "$strategy" '.dns = (.dns // {}) | .dns.strategy = $s' "$is_config_json" >"$tmp" && mv -f "$tmp" "$is_config_json"
+    jq --arg s "$strategy" '.dns = (.dns // {}) | .dns.strategy = $s | .route = (.route // {}) | .route.default_domain_resolver = (if (.route.default_domain_resolver | type) == "object" then .route.default_domain_resolver else {} end) | .route.default_domain_resolver.strategy = $s' "$is_config_json" >"$tmp" && mv -f "$tmp" "$is_config_json"
 }
 
 is_valid_ipv4_addr() {
