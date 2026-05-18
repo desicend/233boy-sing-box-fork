@@ -102,7 +102,7 @@ cat > "$is_conf_dir/VLESS-REALITY-12345.json" <<'EOF'
 }
 EOF
 
-jq -n '{node_name:"MyNode"}' > "$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
+jq -n '{node_name:"MyNode",entry_addr:"edge.example.com"}' > "$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
 change VLESS-REALITY-12345.json sni new.example.com >/dev/null
 
 sni_meta_file="$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
@@ -117,6 +117,12 @@ jq -e '.node_name == "MyNode"' "$sni_meta_file" >/dev/null || {
   exit 1
 }
 
+jq -e '.entry_addr == "edge.example.com"' "$sni_meta_file" >/dev/null || {
+  echo "FAIL: change sni should preserve custom entry address"
+  cat "$sni_meta_file"
+  exit 1
+}
+
 sni_label=$(node_name_for_link "VLESS-REALITY-12345.json")
 [[ "$sni_label" == "MyNode" ]] || {
   echo "FAIL: node_name_for_link should keep MyNode after change sni"
@@ -124,4 +130,31 @@ sni_label=$(node_name_for_link "VLESS-REALITY-12345.json")
   exit 1
 }
 
-echo "PASS: node rename and change sni preserve link label metadata"
+is_dont_show_info=1
+info VLESS-REALITY-12345.json
+[[ "$is_addr" == "edge.example.com" ]] || {
+  echo "FAIL: link address should keep custom entry address after change sni"
+  echo "is_addr=${is_addr:-<empty>}"
+  exit 1
+}
+
+[[ "$is_url" == *"@edge.example.com:12345"* ]] || {
+  echo "FAIL: URL should keep custom entry address after change sni"
+  echo "$is_url"
+  exit 1
+}
+
+change VLESS-REALITY-12345.json entry new-entry.example.com >/dev/null
+[[ "$is_addr" == "new-entry.example.com" ]] || {
+  echo "FAIL: change entry should refresh current link address immediately"
+  echo "is_addr=${is_addr:-<empty>}"
+  exit 1
+}
+
+[[ "$is_url" == *"@new-entry.example.com:12345"* ]] || {
+  echo "FAIL: change entry should refresh current URL immediately"
+  echo "$is_url"
+  exit 1
+}
+
+echo "PASS: node link metadata and URL display survive config changes"

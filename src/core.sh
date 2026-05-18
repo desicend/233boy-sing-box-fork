@@ -550,7 +550,7 @@ sync_entry_addr_config() {
 create() {
     case $1 in
     server)
-        local preserved_node_name
+        local preserved_node_name preserved_entry_addr
         is_tls=none
         get new
         # listen
@@ -572,11 +572,13 @@ create() {
             return
         }
         [[ $is_change && $is_config_file ]] && preserved_node_name=$(meta_get "$is_config_file" '.node_name')
+        [[ $is_change && $is_config_file ]] && preserved_entry_addr=$(meta_get "$is_config_file" '.entry_addr')
         # del old file
         [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
         # save json to file
         cat <<<$is_new_json >"$is_json_file"
         [[ $preserved_node_name && $is_config_name ]] && meta_set "$is_config_name" node_name "$preserved_node_name"
+        [[ $preserved_entry_addr && $is_config_name ]] && meta_set "$is_config_name" entry_addr "$preserved_entry_addr"
         if [[ $is_new_install ]]; then
             # config.json
             create config.json
@@ -1669,7 +1671,10 @@ get() {
 
 # show info
 info() {
-    if [[ ! $is_protocol ]]; then
+    local info_target=${1:-${is_config_file:-$is_config_name}}
+    if [[ $info_target ]]; then
+        get info "$info_target"
+    elif [[ ! $is_protocol ]]; then
         get info $1
     fi
     # is_color=$(shuf -i 41-45 -n1)
