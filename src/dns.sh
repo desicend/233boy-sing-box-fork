@@ -60,6 +60,7 @@ dns_set() {
             cat <<<$(jq '.dns.servers=[{address:"'$is_dns_use'",address_resolver:"local"},{tag:"local",address:"local"}]' $is_config_json) >$is_config_json
         fi
     fi
+    sync_runtime_node_outbound_modes
     manage restart &
     msg "\n已更新 DNS 为: $(_green $is_dns_use_bak)\n"
 }

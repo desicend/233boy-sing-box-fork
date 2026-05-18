@@ -102,7 +102,7 @@ cat > "$is_conf_dir/VLESS-REALITY-12345.json" <<'EOF'
 }
 EOF
 
-jq -n '{node_name:"MyNode",entry_addr:"edge.example.com"}' > "$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
+jq -n '{node_name:"MyNode",entry_addr:"edge.example.com",outbound_mode:"V4优先"}' > "$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
 change VLESS-REALITY-12345.json sni new.example.com >/dev/null
 
 sni_meta_file="$is_conf_dir/.quan-meta/VLESS-REALITY-12345.json.meta.json"
@@ -119,6 +119,12 @@ jq -e '.node_name == "MyNode"' "$sni_meta_file" >/dev/null || {
 
 jq -e '.entry_addr == "edge.example.com"' "$sni_meta_file" >/dev/null || {
   echo "FAIL: change sni should preserve custom entry address"
+  cat "$sni_meta_file"
+  exit 1
+}
+
+jq -e '.outbound_mode == "V4优先"' "$sni_meta_file" >/dev/null || {
+  echo "FAIL: change sni should preserve outbound mode"
   cat "$sni_meta_file"
   exit 1
 }
@@ -157,4 +163,65 @@ change VLESS-REALITY-12345.json entry new-entry.example.com >/dev/null
   exit 1
 }
 
-echo "PASS: node link metadata and URL display survive config changes"
+cat > "$is_config_json" <<'EOF'
+{
+  "dns": {
+    "servers": [
+      {"tag": "dns", "type": "udp", "server": "1.1.1.1", "domain_resolver": "local"},
+      {"tag": "local", "type": "local"}
+    ]
+  },
+  "route": {"default_domain_resolver": "dns"},
+  "outbounds": [{"tag": "direct", "type": "direct"}]
+}
+EOF
+
+cat > "$is_conf_dir/node-b.json" <<'EOF'
+{
+  "inbounds": [
+    {
+      "tag": "node-b.json",
+      "type": "shadowsocks",
+      "listen": "0.0.0.0",
+      "listen_port": 22345,
+      "method": "aes-128-gcm",
+      "password": "pass456"
+    }
+  ]
+}
+EOF
+
+jq -n '{outbound_mode:"V6优先"}' > "$is_conf_dir/.quan-meta/node-b.json.meta.json"
+sync_runtime_node_outbound_modes
+
+jq -e '.outbounds[] | select(.tag == "direct_v4_pref" and .domain_resolver.server == "dns" and .domain_resolver.strategy == "prefer_ipv4")' "$is_config_json" >/dev/null || {
+  echo "FAIL: V4 preferred direct outbound missing"
+  jq . "$is_config_json"
+  exit 1
+}
+
+jq -e '.outbounds[] | select(.tag == "direct_v6_pref" and .domain_resolver.server == "dns" and .domain_resolver.strategy == "prefer_ipv6")' "$is_config_json" >/dev/null || {
+  echo "FAIL: V6 preferred direct outbound missing"
+  jq . "$is_config_json"
+  exit 1
+}
+
+jq -e '.route.rules[] | select((.inbound[0] == "VLESS-REALITY-12345.json") and .outbound == "direct_v4_pref")' "$is_config_json" >/dev/null || {
+  echo "FAIL: V4 preferred route rule missing"
+  jq . "$is_config_json"
+  exit 1
+}
+
+jq -e '.route.rules[] | select((.inbound[0] == "node-b.json") and .outbound == "direct_v6_pref")' "$is_config_json" >/dev/null || {
+  echo "FAIL: V6 preferred route rule missing"
+  jq . "$is_config_json"
+  exit 1
+}
+
+jq -e '.dns.strategy == null' "$is_config_json" >/dev/null || {
+  echo "FAIL: global DNS strategy should not be used for per-node outbound mode"
+  jq . "$is_config_json"
+  exit 1
+}
+
+echo "PASS: node link metadata, URL display, and per-node outbound modes survive config changes"

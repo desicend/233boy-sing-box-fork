@@ -461,23 +461,59 @@ node_name_for_link() {
     echo "${cfg%.json}"
 }
 
-outbound_mode_to_dns_strategy() {
+outbound_mode_to_direct_tag() {
     case $1 in
-    "V6优先") echo prefer_ipv6 ;;
-    "V4优先") echo prefer_ipv4 ;;
-    "仅V4") echo ipv4_only ;;
-    "仅V6") echo ipv6_only ;;
+    "V6优先") echo direct_v6_pref ;;
+    "V4优先") echo direct_v4_pref ;;
+    "仅V4") echo direct_v4_only ;;
+    "仅V6") echo direct_v6_only ;;
     *) return 1 ;;
     esac
 }
 
-sync_runtime_dns_strategy() {
-    local mode=$1
-    local strategy tmp
-    strategy=$(outbound_mode_to_dns_strategy "$mode") || err "不支持的出站方式: $mode"
-    [[ -f "$is_config_json" ]] || create config.json
+runtime_domain_resolver_tag() {
+    jq -r 'if (.route.default_domain_resolver | type) == "string" then .route.default_domain_resolver elif (.route.default_domain_resolver | type) == "object" then (.route.default_domain_resolver.server // "local") else "local" end' "$is_config_json" 2>/dev/null
+}
+
+sync_runtime_node_outbound_modes() {
+    local resolver rules tmp file cfg mode outbound
+    [[ -f "$is_config_json" ]] || return
+
+    resolver=$(runtime_domain_resolver_tag)
+    [[ $resolver ]] || resolver=local
+    rules='[]'
+    shopt -s nullglob
+    for file in "$is_conf_dir"/*.json; do
+        cfg=${file##*/}
+        [[ $cfg =~ dynamic-port-.*-link ]] && continue
+        mode=$(meta_get "$cfg" '.outbound_mode')
+        [[ $mode ]] || continue
+        outbound=$(outbound_mode_to_direct_tag "$mode") || continue
+        rules=$(jq --arg inbound "$cfg" --arg outbound "$outbound" '. += [{inbound:[$inbound],action:"route",outbound:$outbound}]' <<<"$rules")
+    done
+    shopt -u nullglob
+
     tmp="$is_config_json.tmp"
-    jq --arg s "$strategy" '.dns = (.dns // {}) | .dns.strategy = $s | .route = (.route // {}) | .route.default_domain_resolver = (if (.route.default_domain_resolver | type) == "object" then .route.default_domain_resolver else {} end) | .route.default_domain_resolver.strategy = $s' "$is_config_json" >"$tmp" && mv -f "$tmp" "$is_config_json"
+    jq --arg resolver "$resolver" --argjson rules "$rules" '
+        def managed_tags: ["direct_v6_pref","direct_v4_pref","direct_v4_only","direct_v6_only"];
+        def managed_outbounds($r): [
+            {tag:"direct_v6_pref",type:"direct",domain_resolver:{server:$r,strategy:"prefer_ipv6"}},
+            {tag:"direct_v4_pref",type:"direct",domain_resolver:{server:$r,strategy:"prefer_ipv4"}},
+            {tag:"direct_v4_only",type:"direct",domain_resolver:{server:$r,strategy:"ipv4_only"}},
+            {tag:"direct_v6_only",type:"direct",domain_resolver:{server:$r,strategy:"ipv6_only"}}
+        ];
+        .dns = (.dns // {})
+        | if (($rules | length) > 0 and $resolver == "local") then
+            .dns.servers = (if (.dns.servers | type) == "array" then .dns.servers else [] end)
+            | if any(.dns.servers[]?; .tag == "local") then . else .dns.servers += [{tag:"local",type:"local"}] end
+          else . end
+        | del(.dns.strategy)
+        | .route = (.route // {})
+        | if (.route.default_domain_resolver | type) == "object" then del(.route.default_domain_resolver.strategy) else . end
+        | .outbounds = ((.outbounds // []) | map(select(((.tag // "") as $tag | (managed_tags | index($tag) | not)))))
+        | if (($rules | length) > 0) then .outbounds += managed_outbounds($resolver) else . end
+        | .route.rules = ((.route.rules // []) | map(select(((.outbound // "") as $outbound | (managed_tags | index($outbound) | not))))) + $rules
+    ' "$is_config_json" >"$tmp" && mv -f "$tmp" "$is_config_json"
 }
 
 is_valid_ipv4_addr() {
@@ -550,7 +586,7 @@ sync_entry_addr_config() {
 create() {
     case $1 in
     server)
-        local preserved_node_name preserved_entry_addr
+        local preserved_node_name preserved_entry_addr preserved_outbound_mode
         is_tls=none
         get new
         # listen
@@ -573,12 +609,15 @@ create() {
         }
         [[ $is_change && $is_config_file ]] && preserved_node_name=$(meta_get "$is_config_file" '.node_name')
         [[ $is_change && $is_config_file ]] && preserved_entry_addr=$(meta_get "$is_config_file" '.entry_addr')
+        [[ $is_change && $is_config_file ]] && preserved_outbound_mode=$(meta_get "$is_config_file" '.outbound_mode')
         # del old file
         [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
         # save json to file
         cat <<<$is_new_json >"$is_json_file"
         [[ $preserved_node_name && $is_config_name ]] && meta_set "$is_config_name" node_name "$preserved_node_name"
         [[ $preserved_entry_addr && $is_config_name ]] && meta_set "$is_config_name" entry_addr "$preserved_entry_addr"
+        [[ $preserved_outbound_mode && $is_config_name ]] && meta_set "$is_config_name" outbound_mode "$preserved_outbound_mode"
+        sync_runtime_node_outbound_modes
         if [[ $is_new_install ]]; then
             # config.json
             create config.json
@@ -622,6 +661,7 @@ create() {
         is_outbounds='outbounds:[{tag:"direct",type:"direct"}]'
         is_server_config_json=$(jq "{$is_log,$is_dns,$is_ntp$is_outbounds}" <<<{})
         cat <<<$is_server_config_json >$is_config_json
+        sync_runtime_node_outbound_modes
         manage restart &
         ;;
     esac
@@ -906,7 +946,10 @@ change() {
         ;;
     14)
         ask set_outbound_mode
-        sync_runtime_dns_strategy "$is_outbound_mode"
+        meta_set "$is_config_file" outbound_mode "$is_outbound_mode"
+        [[ -f "$is_config_json" ]] || create config.json
+        sync_runtime_node_outbound_modes
+        manage restart &
         msg "\n已更新出站方式为: $(_green $is_outbound_mode)\n"
         ;;
     15)
@@ -940,6 +983,7 @@ del() {
         fi
         rm -rf $is_conf_dir/"$is_config_file"
         meta_rm "$is_config_file"
+        [[ -f "$is_config_json" ]] && sync_runtime_node_outbound_modes
         [[ ! $is_new_json ]] && manage restart &
         [[ ! $is_no_del_msg ]] && _green "\n已删除: $is_config_file\n"
 
