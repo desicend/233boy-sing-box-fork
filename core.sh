@@ -509,7 +509,15 @@ sync_runtime_node_outbound_modes() {
           else . end
         | del(.dns.strategy)
         | .route = (.route // {})
-        | if (.route.default_domain_resolver | type) == "object" then del(.route.default_domain_resolver.strategy) else . end
+        | if (.route.default_domain_resolver | type) == "object" then
+            if ((.route.default_domain_resolver.server // "") | length) > 0 then
+                .route.default_domain_resolver = .route.default_domain_resolver.server
+            else
+                del(.route.default_domain_resolver)
+            end
+          elif (.route.default_domain_resolver | type) == "string" and ((.route.default_domain_resolver // "") | length) == 0 then
+            del(.route.default_domain_resolver)
+          else . end
         | .outbounds = ((.outbounds // []) | map(select(((.tag // "") as $tag | (managed_tags | index($tag) | not)))))
         | if (($rules | length) > 0) then .outbounds += managed_outbounds($resolver) else . end
         | .route.rules = ((.route.rules // []) | map(select(((.outbound // "") as $outbound | (managed_tags | index($outbound) | not))))) + $rules

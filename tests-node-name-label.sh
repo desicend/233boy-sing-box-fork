@@ -224,4 +224,32 @@ jq -e '.dns.strategy == null' "$is_config_json" >/dev/null || {
   exit 1
 }
 
+cat > "$is_config_json" <<'EOF'
+{
+  "dns": {},
+  "route": {"default_domain_resolver": {"strategy": "prefer_ipv6"}},
+  "outbounds": [{"tag": "direct", "type": "direct"}]
+}
+EOF
+
+sync_runtime_node_outbound_modes
+
+jq -e '(.route.default_domain_resolver // null) != ""' "$is_config_json" >/dev/null || {
+  echo "FAIL: default_domain_resolver should not become an empty string"
+  jq . "$is_config_json"
+  exit 1
+}
+
+jq -e '(.route.default_domain_resolver // null | type) != "object"' "$is_config_json" >/dev/null || {
+  echo "FAIL: default_domain_resolver should not remain an object without server"
+  jq . "$is_config_json"
+  exit 1
+}
+
+jq -e '.outbounds[] | select(.tag == "direct_v4_pref" and .domain_resolver.server == "local")' "$is_config_json" >/dev/null || {
+  echo "FAIL: fallback local resolver should be used when old default_domain_resolver object has no server"
+  jq . "$is_config_json"
+  exit 1
+}
+
 echo "PASS: node link metadata, URL display, and per-node outbound modes survive config changes"
