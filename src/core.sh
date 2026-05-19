@@ -552,6 +552,24 @@ random_node_name() {
     tr -dc 'A-Za-z0-9' </dev/urandom | head -c 8
 }
 
+ss_password_for_method() {
+    local method=$1
+    if [[ $(grep 128 <<<$method) ]]; then
+        $is_core_bin generate rand 16 --base64
+    else
+        $is_core_bin generate rand 32 --base64
+    fi
+}
+
+ss_password_valid_for_method() {
+    local method=$1 password=$2 expected_len decoded_len
+    [[ $method != *2022* ]] && return 0
+    [[ $password ]] || return 1
+    [[ $(grep 128 <<<$method) ]] && expected_len=16 || expected_len=32
+    decoded_len=$(printf '%s' "$password" | base64 -d 2>/dev/null | wc -c)
+    [[ ${decoded_len// /} -eq $expected_len ]]
+}
+
 resolve_entry_addr_for_listen() {
     local addr=$1
     if [[ $(is_test domain "$addr") ]]; then
@@ -842,13 +860,18 @@ change() {
     6)
         # new method
         is_new_method=$3
+        is_new_ss_password=$ss_password
         [[ $net != 'ss' ]] && err "($is_config_file) 不支持更改加密方式."
         [[ $is_auto ]] && is_new_method=$is_random_ss_method
         [[ ! $is_new_method ]] && {
             ask set_ss_method
             is_new_method=$ss_method
         }
-        add $net auto auto $is_new_method
+        if [[ $(grep 2022 <<<$is_new_method) ]] && ! ss_password_valid_for_method "$is_new_method" "$is_new_ss_password"; then
+            is_new_ss_password=$(ss_password_for_method "$is_new_method")
+            msg "\n已根据新的加密方式自动更新密码: $(_green $is_new_ss_password)\n"
+        fi
+        [[ $is_new_ss_password ]] && add $net auto "$is_new_ss_password" $is_new_method || add $net auto auto $is_new_method
         ;;
     7)
         # new remote addr
