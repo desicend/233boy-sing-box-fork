@@ -594,7 +594,7 @@ sync_entry_addr_config() {
 create() {
     case $1 in
     server)
-        local preserved_node_name preserved_entry_addr preserved_outbound_mode
+        local preserved_node_name preserved_entry_addr preserved_outbound_mode previous_config_file
         is_tls=none
         get new
         # listen
@@ -618,6 +618,7 @@ create() {
         [[ $is_change && $is_config_file ]] && preserved_node_name=$(meta_get "$is_config_file" '.node_name')
         [[ $is_change && $is_config_file ]] && preserved_entry_addr=$(meta_get "$is_config_file" '.entry_addr')
         [[ $is_change && $is_config_file ]] && preserved_outbound_mode=$(meta_get "$is_config_file" '.outbound_mode')
+        previous_config_file=$is_config_file
         # del old file
         [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
         # save json to file
@@ -625,6 +626,8 @@ create() {
         [[ $preserved_node_name && $is_config_name ]] && meta_set "$is_config_name" node_name "$preserved_node_name"
         [[ $preserved_entry_addr && $is_config_name ]] && meta_set "$is_config_name" entry_addr "$preserved_entry_addr"
         [[ $preserved_outbound_mode && $is_config_name ]] && meta_set "$is_config_name" outbound_mode "$preserved_outbound_mode"
+        [[ $is_config_name ]] && is_config_file=$is_config_name
+        [[ $is_change && $previous_config_file && $previous_config_file != $is_config_name ]] && msg "\n配置文件修改成功: $(_green $previous_config_file) -> $(_green $is_config_name)\n"
         sync_runtime_node_outbound_modes
         if [[ $is_new_install ]]; then
             # config.json
