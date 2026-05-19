@@ -171,6 +171,7 @@ outbound_mode_list=(
     "V4优先"
     "仅V4"
     "仅V6"
+    "SS 出站"
 )
 servername_list=(
     www.amazon.com
@@ -333,7 +334,7 @@ ask() {
         ;;
     set_outbound_mode)
         is_tmp_list=("${outbound_mode_list[@]}")
-        is_opt_msg="\n请选择出站方式:\n"
+        is_opt_msg="\n当前出站方式: $(current_outbound_mode_display "$is_config_file")\n\n请选择出站方式:\n"
         is_ask_set=is_outbound_mode
         ;;
     string)
@@ -471,30 +472,79 @@ outbound_mode_to_direct_tag() {
     esac
 }
 
+current_outbound_mode_display() {
+    local cfg=$1 mode name server port
+    [[ $cfg ]] || {
+        echo 未设置
+        return
+    }
+    mode=$(meta_get "$cfg" '.outbound_mode')
+    [[ $mode ]] || {
+        echo 未设置
+        return
+    }
+    if [[ $mode == 'SS 出站' ]]; then
+        name=$(meta_get "$cfg" '.outbound_ss_name')
+        [[ $name ]] && {
+            echo "$mode ($name)"
+            return
+        }
+        server=$(meta_get "$cfg" '.outbound_ss_server')
+        port=$(meta_get "$cfg" '.outbound_ss_port')
+        [[ $server && $port ]] && {
+            echo "$mode ($server:$port)"
+            return
+        }
+    fi
+    echo "$mode"
+}
+
+runtime_node_ss_outbound_tag() {
+    local cfg=$1 safe
+    safe=${cfg//[^[:alnum:]_-]/_}
+    echo "managed_node_ss_$safe"
+}
+
 runtime_domain_resolver_tag() {
     jq -r 'if (.route.default_domain_resolver | type) == "string" then .route.default_domain_resolver elif (.route.default_domain_resolver | type) == "object" then (.route.default_domain_resolver.server // "local") else "local" end' "$is_config_json" 2>/dev/null
 }
 
 sync_runtime_node_outbound_modes() {
-    local resolver rules tmp file cfg mode outbound
+    local resolver rules ss_outbounds tmp file cfg mode outbound server port method password
     [[ -f "$is_config_json" ]] || return
 
     resolver=$(runtime_domain_resolver_tag)
     [[ $resolver ]] || resolver=local
     rules='[]'
+    ss_outbounds='[]'
     shopt -s nullglob
     for file in "$is_conf_dir"/*.json; do
         cfg=${file##*/}
         [[ $cfg =~ dynamic-port-.*-link ]] && continue
         mode=$(meta_get "$cfg" '.outbound_mode')
         [[ $mode ]] || continue
-        outbound=$(outbound_mode_to_direct_tag "$mode") || continue
+        outbound=$(outbound_mode_to_direct_tag "$mode")
+        if [[ $outbound ]]; then
+            rules=$(jq --arg inbound "$cfg" --arg outbound "$outbound" '. += [{inbound:[$inbound],action:"route",outbound:$outbound}]' <<<"$rules")
+            continue
+        fi
+        [[ $mode == 'SS 出站' ]] || continue
+        server=$(meta_get "$cfg" '.outbound_ss_server')
+        port=$(meta_get "$cfg" '.outbound_ss_port')
+        method=$(meta_get "$cfg" '.outbound_ss_method')
+        password=$(meta_get "$cfg" '.outbound_ss_password')
+        [[ $server && $port && $method && $password ]] || continue
+        ss_method_supported "$method" || continue
+        [[ $(is_test port "$port") ]] || continue
+        ss_password_valid_for_method "$method" "$password" || continue
+        outbound=$(runtime_node_ss_outbound_tag "$cfg")
+        ss_outbounds=$(jq --arg tag "$outbound" --arg server "$server" --argjson port "$port" --arg method "$method" --arg password "$password" '. += [{tag:$tag,type:"shadowsocks",server:$server,server_port:$port,method:$method,password:$password}]' <<<"$ss_outbounds")
         rules=$(jq --arg inbound "$cfg" --arg outbound "$outbound" '. += [{inbound:[$inbound],action:"route",outbound:$outbound}]' <<<"$rules")
     done
     shopt -u nullglob
 
     tmp="$is_config_json.tmp"
-    jq --arg resolver "$resolver" --argjson rules "$rules" '
+    jq --arg resolver "$resolver" --argjson rules "$rules" --argjson ss_outbounds "$ss_outbounds" '
         def managed_tags: ["direct_v6_pref","direct_v4_pref","direct_v4_only","direct_v6_only"];
         def managed_outbounds($r): [
             {tag:"direct_v6_pref",type:"direct",domain_resolver:{server:$r,strategy:"prefer_ipv6"}},
@@ -502,6 +552,7 @@ sync_runtime_node_outbound_modes() {
             {tag:"direct_v4_only",type:"direct",domain_resolver:{server:$r,strategy:"ipv4_only"}},
             {tag:"direct_v6_only",type:"direct",domain_resolver:{server:$r,strategy:"ipv6_only"}}
         ];
+        def is_managed_ss_tag($tag): $tag | startswith("managed_node_ss_");
         .dns = (.dns // {})
         | if (($rules | length) > 0 and $resolver == "local") then
             .dns.servers = (if (.dns.servers | type) == "array" then .dns.servers else [] end)
@@ -518,9 +569,9 @@ sync_runtime_node_outbound_modes() {
           elif (.route.default_domain_resolver | type) == "string" and ((.route.default_domain_resolver // "") | length) == 0 then
             del(.route.default_domain_resolver)
           else . end
-        | .outbounds = ((.outbounds // []) | map(select(((.tag // "") as $tag | (managed_tags | index($tag) | not)))))
-        | if (($rules | length) > 0) then .outbounds += managed_outbounds($resolver) else . end
-        | .route.rules = ((.route.rules // []) | map(select(((.outbound // "") as $outbound | (managed_tags | index($outbound) | not))))) + $rules
+        | .outbounds = ((.outbounds // []) | map(select(((.tag // "") as $tag | (managed_tags | index($tag) | not) and (is_managed_ss_tag($tag) | not)))))
+        | if (($rules | length) > 0) then .outbounds += managed_outbounds($resolver) + $ss_outbounds else . end
+        | .route.rules = ((.route.rules // []) | map(select(((.outbound // "") as $outbound | (managed_tags | index($outbound) | not) and (is_managed_ss_tag($outbound) | not))))) + $rules
     ' "$is_config_json" >"$tmp" && mv -f "$tmp" "$is_config_json"
 }
 
@@ -570,6 +621,57 @@ ss_password_valid_for_method() {
     [[ ${decoded_len// /} -eq $expected_len ]]
 }
 
+ss_base64_decode() {
+    local input=$1 mod
+    input=${input//-/+}
+    input=${input//_/\/}
+    mod=$((${#input} % 4))
+    [[ $mod == 1 ]] && return 1
+    [[ $mod == 2 ]] && input+="=="
+    [[ $mod == 3 ]] && input+="="
+    printf '%s' "$input" | base64 -d 2>/dev/null
+}
+
+ss_method_supported() {
+    local method=$1 v
+    for v in ${ss_method_list[@]}; do
+        [[ $v == "$method" ]] && return 0
+    done
+    return 1
+}
+
+url_decode() {
+    local s=${1//+/ }
+    printf '%b' "${s//%/\\x}"
+}
+
+parse_ss_uri_for_outbound() {
+    local uri auth endpoint raw_name decoded_auth
+    uri=$(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <<<$1)
+    [[ $uri == ss://* ]] || return 1
+    uri=${uri#ss://}
+    if [[ $uri == *#* ]]; then
+        raw_name=${uri#*#}
+        uri=${uri%%#*}
+    fi
+    [[ $uri == *\?* ]] && return 1
+    [[ $uri == *@* ]] || return 1
+    auth=${uri%@*}
+    endpoint=${uri#*@}
+    decoded_auth=$(ss_base64_decode "$auth") || return 1
+    [[ $decoded_auth == *:* ]] || return 1
+    is_outbound_ss_method=${decoded_auth%%:*}
+    is_outbound_ss_password=${decoded_auth#*:}
+    is_outbound_ss_server=${endpoint%:*}
+    is_outbound_ss_port=${endpoint##*:}
+    [[ $is_outbound_ss_server && $is_outbound_ss_port && $is_outbound_ss_server != "$endpoint" ]] || return 1
+    ss_method_supported "$is_outbound_ss_method" || return 1
+    [[ $(is_test port "$is_outbound_ss_port") ]] || return 1
+    [[ $is_outbound_ss_password ]] || return 1
+    ss_password_valid_for_method "$is_outbound_ss_method" "$is_outbound_ss_password" || return 1
+    is_outbound_ss_name=$(url_decode "$raw_name")
+}
+
 resolve_entry_addr_for_listen() {
     local addr=$1
     if [[ $(is_test domain "$addr") ]]; then
@@ -612,7 +714,7 @@ sync_entry_addr_config() {
 create() {
     case $1 in
     server)
-        local preserved_node_name preserved_entry_addr preserved_outbound_mode previous_config_file
+        local preserved_node_name preserved_entry_addr preserved_outbound_mode preserved_outbound_ss_server preserved_outbound_ss_port preserved_outbound_ss_method preserved_outbound_ss_password preserved_outbound_ss_name previous_config_file
         is_tls=none
         get new
         # listen
@@ -636,6 +738,11 @@ create() {
         [[ $is_change && $is_config_file ]] && preserved_node_name=$(meta_get "$is_config_file" '.node_name')
         [[ $is_change && $is_config_file ]] && preserved_entry_addr=$(meta_get "$is_config_file" '.entry_addr')
         [[ $is_change && $is_config_file ]] && preserved_outbound_mode=$(meta_get "$is_config_file" '.outbound_mode')
+        [[ $is_change && $is_config_file ]] && preserved_outbound_ss_server=$(meta_get "$is_config_file" '.outbound_ss_server')
+        [[ $is_change && $is_config_file ]] && preserved_outbound_ss_port=$(meta_get "$is_config_file" '.outbound_ss_port')
+        [[ $is_change && $is_config_file ]] && preserved_outbound_ss_method=$(meta_get "$is_config_file" '.outbound_ss_method')
+        [[ $is_change && $is_config_file ]] && preserved_outbound_ss_password=$(meta_get "$is_config_file" '.outbound_ss_password')
+        [[ $is_change && $is_config_file ]] && preserved_outbound_ss_name=$(meta_get "$is_config_file" '.outbound_ss_name')
         previous_config_file=$is_config_file
         # del old file
         [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
@@ -644,6 +751,11 @@ create() {
         [[ $preserved_node_name && $is_config_name ]] && meta_set "$is_config_name" node_name "$preserved_node_name"
         [[ $preserved_entry_addr && $is_config_name ]] && meta_set "$is_config_name" entry_addr "$preserved_entry_addr"
         [[ $preserved_outbound_mode && $is_config_name ]] && meta_set "$is_config_name" outbound_mode "$preserved_outbound_mode"
+        [[ $preserved_outbound_ss_server && $is_config_name ]] && meta_set "$is_config_name" outbound_ss_server "$preserved_outbound_ss_server"
+        [[ $preserved_outbound_ss_port && $is_config_name ]] && meta_set "$is_config_name" outbound_ss_port "$preserved_outbound_ss_port"
+        [[ $preserved_outbound_ss_method && $is_config_name ]] && meta_set "$is_config_name" outbound_ss_method "$preserved_outbound_ss_method"
+        [[ $preserved_outbound_ss_password && $is_config_name ]] && meta_set "$is_config_name" outbound_ss_password "$preserved_outbound_ss_password"
+        [[ $preserved_outbound_ss_name && $is_config_name ]] && meta_set "$is_config_name" outbound_ss_name "$preserved_outbound_ss_name"
         [[ $is_config_name ]] && is_config_file=$is_config_name
         [[ $is_change && $previous_config_file && $previous_config_file != $is_config_name ]] && msg "\n配置文件修改成功: $(_green $previous_config_file) -> $(_green $is_config_name)\n"
         sync_runtime_node_outbound_modes
@@ -980,11 +1092,20 @@ change() {
         ;;
     14)
         ask set_outbound_mode
+        if [[ $is_outbound_mode == 'SS 出站' ]]; then
+            ask string is_outbound_ss_uri "请输入 SS 节点链接:"
+            parse_ss_uri_for_outbound "$is_outbound_ss_uri" || err "SS 节点链接格式无效, 目前仅支持 ss://BASE64(method:password)@host:port#name"
+            meta_set "$is_config_file" outbound_ss_server "$is_outbound_ss_server"
+            meta_set "$is_config_file" outbound_ss_port "$is_outbound_ss_port"
+            meta_set "$is_config_file" outbound_ss_method "$is_outbound_ss_method"
+            meta_set "$is_config_file" outbound_ss_password "$is_outbound_ss_password"
+            meta_set "$is_config_file" outbound_ss_name "$is_outbound_ss_name"
+        fi
         meta_set "$is_config_file" outbound_mode "$is_outbound_mode"
         [[ -f "$is_config_json" ]] || create config.json
         sync_runtime_node_outbound_modes
         manage restart &
-        msg "\n已更新出站方式为: $(_green $is_outbound_mode)\n"
+        msg "\n已更新出站方式为: $(_green $(current_outbound_mode_display "$is_config_file"))\n"
         ;;
     15)
         is_new_entry_addr=$3
