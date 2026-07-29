@@ -1592,6 +1592,8 @@ get() {
             is_addr=$ip
             [[ $(grep ":" <<<$ip) ]] && is_addr="[$ip]"
         }
+        # IPv6 地址加方括号 (URL 格式要求)
+        [[ $is_addr == *:* && $is_addr != \[*\] ]] && is_addr="[$is_addr]"
         ;;
     new)
         [[ ! $host ]] && get_ip
