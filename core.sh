@@ -1012,7 +1012,7 @@ change() {
         [[ $host && ! $is_caddy || $is_no_auto_tls ]] && err "($is_config_file) 不支持更改端口, 因为没啥意义."
         if [[ $is_new_port && ! $is_auto ]]; then
             [[ ! $(is_test port $is_new_port) ]] && err "请输入正确的端口, 可选(1-65535)"
-            [[ $is_new_port != 443 && $(is_test port_used $is_new_port) ]] && err "无法使用 ($is_new_port) 端口"
+            [[ $is_new_port != 443 && $(is_test port_used $is_new_port) && ${is_protocol,,} != snell ]] && err "无法使用 ($is_new_port) 端口"
         fi
         [[ $is_auto ]] && get_port && is_new_port=$tmp_port
         [[ ! $is_new_port ]] && ask string is_new_port "请输入新端口:"
@@ -1546,7 +1546,7 @@ add() {
             [[ ! $(is_test port ${is_use_port}) ]] && {
                 err "($is_use_port) 不是一个有效的端口. $is_err_tips"
             }
-            [[ $(is_test port_used $is_use_port) && ! $is_gen ]] && {
+            [[ $(is_test port_used $is_use_port) && ! $is_gen && ${is_new_protocol,,} != snell ]] && {
                 err "无法使用 ($is_use_port) 端口. $is_err_tips"
             }
             port=$is_use_port

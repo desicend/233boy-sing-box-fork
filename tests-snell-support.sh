@@ -226,6 +226,11 @@ change snell-41601.json snell-version 5 || fail "Snell version change should suc
 change snell-41601.json obfs none || fail "Snell obfs change should succeed"
 [[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == none ]] || fail "Snell obfs change was not saved"
 
+if ! (TEST_ACTIVE_PORT=41601 change snell-41601.json port 41601 >/dev/null 2>&1); then
+  fail "same-port Snell change should ignore the current active listener"
+fi
+[[ -f $is_conf_dir/snell-41601.json ]] || fail "same-port Snell change should keep the existing filename"
+
 change snell-41601.json port 41606 || fail "Snell port change should succeed"
 [[ ! -f $is_conf_dir/snell-41601.json ]] || fail "old Snell port file should be removed after replacement"
 [[ -f $is_conf_dir/snell-41606.json ]] || fail "new Snell port file should exist after replacement"
