@@ -147,6 +147,9 @@ info_list=(
     "用户名 (Username)"
     "跳过证书验证 (allowInsecure)"
     "拥塞控制算法 (congestion_control)"
+    "版本 (version)"
+    "PSK"
+    "混淆模式 (obfs_mode)"
 )
 change_list=(
     "更改协议"
@@ -166,6 +169,9 @@ change_list=(
     "更改出站方式"
     "更改入口地址"
     "查看当前节点链接"
+    "更改 PSK"
+    "更改 Snell 版本"
+    "更改 Snell 混淆模式"
 )
 outbound_mode_list=(
     "V6优先"
@@ -799,12 +805,12 @@ create() {
             is_new_json=$(jq "{inbounds:[{tag:\"$is_config_name\",type:\"$is_protocol\",$is_listen,listen_port:$port,$json_str}]$is_add_public_key}" <<<{})
         fi
         [[ $is_test_json ]] && {
-            rm -f "$is_snell_tmp_file"
+            [[ $is_snell_tmp_file ]] && rm -f "$is_snell_tmp_file"
             return
         }
-        rm -f "$is_snell_tmp_file"
         # only show json, dont save to file.
         [[ $is_gen ]] && {
+            [[ $is_snell_tmp_file ]] && rm -f "$is_snell_tmp_file"
             msg
             jq <<<$is_new_json
             msg
@@ -819,10 +825,19 @@ create() {
         [[ $is_change && $is_config_file ]] && preserved_outbound_ss_password=$(meta_get "$is_config_file" '.outbound_ss_password')
         [[ $is_change && $is_config_file ]] && preserved_outbound_ss_name=$(meta_get "$is_config_file" '.outbound_ss_name')
         previous_config_file=$is_config_file
-        # del old file
-        [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
-        # save json to file
-        cat <<<$is_new_json >"$is_json_file"
+        if [[ ${2,,} == snell ]]; then
+            if ! mv -f "$is_snell_tmp_file" "$is_json_file"; then
+                rm -f "$is_snell_tmp_file"
+                err "保存 Snell 配置失败, 原有配置未改变."
+            fi
+            if [[ $previous_config_file && $previous_config_file != "$is_config_name" ]]; then
+                rm -f "$is_conf_dir/$previous_config_file"
+                meta_move "$previous_config_file" "$is_config_name"
+            fi
+        else
+            [[ $is_config_file ]] && is_no_del_msg=1 && del $is_config_file
+            cat <<<$is_new_json >"$is_json_file"
+        fi
         [[ $preserved_node_name && $is_config_name ]] && meta_set "$is_config_name" node_name "$preserved_node_name"
         [[ $preserved_entry_addr && $is_config_name ]] && meta_set "$is_config_name" entry_addr "$preserved_entry_addr"
         [[ $preserved_outbound_mode && $is_config_name ]] && meta_set "$is_config_name" outbound_mode "$preserved_outbound_mode"
@@ -939,6 +954,15 @@ change() {
             ;;
         link | url)
             is_change_id=16
+            ;;
+        psk | snell-psk)
+            is_change_id=17
+            ;;
+        snell-version | version)
+            is_change_id=18
+            ;;
+        obfs | obfs-mode | obfs_mode)
+            is_change_id=19
             ;;
         *)
             [[ $is_try_change ]] && return
@@ -1191,6 +1215,33 @@ change() {
         is_new_entry_addr=$(sync_entry_addr_config "$is_config_file" "$is_new_entry_addr")
         msg "\n已更新入口地址为: $(_green $is_new_entry_addr)\n"
         info
+        ;;
+    17)
+        [[ $is_protocol == snell ]] || err "($is_config_file) 不支持更改 Snell PSK."
+        is_new_snell_psk=$3
+        [[ $is_auto ]] && is_new_snell_psk=$(get_snell_psk)
+        [[ ! $is_new_snell_psk ]] && ask string is_new_snell_psk "请输入新的 Snell PSK:"
+        snell_psk=$is_new_snell_psk
+        add snell
+        ;;
+    18)
+        [[ $is_protocol == snell ]] || err "($is_config_file) 不支持更改 Snell 版本."
+        is_new_snell_version=$3
+        [[ $is_auto ]] && is_new_snell_version=5
+        [[ ! $is_new_snell_version ]] && ask string is_new_snell_version "请输入新的 Snell 版本:"
+        snell_version=$is_new_snell_version
+        add snell
+        ;;
+    19)
+        [[ $is_protocol == snell ]] || err "($is_config_file) 不支持更改 Snell 混淆模式."
+        is_new_snell_obfs_mode=$3
+        [[ $is_new_snell_obfs_mode == auto ]] && is_new_snell_obfs_mode=none
+        [[ ! $is_new_snell_obfs_mode ]] && {
+            is_tmp_list=(none http)
+            ask list is_new_snell_obfs_mode
+        }
+        snell_obfs_mode=$is_new_snell_obfs_mode
+        add snell
         ;;
     16)
         # view current share link
@@ -1724,9 +1775,9 @@ get() {
         get file $2
         if [[ $is_config_file ]]; then
             is_json_str=$(cat $is_conf_dir/"$is_config_file" | sed s#//.*##)
-            is_json_data=$(jq -r '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag)' <<<$is_json_str)
+            is_json_data=$(jq -r '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag,.inbounds[0].version,.inbounds[0].psk,.inbounds[0].obfs_mode)' <<<$is_json_str)
             [[ $? != 0 ]] && err "无法读取此文件: $is_config_file"
-            is_up_var_set=(null is_protocol port is_listen_addr uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key)
+            is_up_var_set=(null is_protocol port is_listen_addr uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key snell_version snell_psk snell_obfs_mode)
             [[ $is_debug ]] && msg "\n------------- debug: $is_config_file -------------"
             mapfile -t is_json_data_list <<<"$is_json_data"
             i=0
@@ -2083,6 +2134,12 @@ info() {
             is_info_str=($is_protocol $is_addr $port $password tls true)
             is_url="anytls://$password@$is_addr:$port?insecure=1&allowInsecure=1#$is_node_name"
         fi
+        ;;
+    snell)
+        is_can_change=(0 1 13 14 15 17 18 19)
+        is_info_show=(0 1 2 22 23 24)
+        is_info_str=($is_protocol $is_addr $port $snell_version $snell_psk $snell_obfs_mode)
+        is_url=
         ;;
     direct)
         is_can_change=(0 1 7 8 13 14 15 16)

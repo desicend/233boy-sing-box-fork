@@ -80,7 +80,11 @@ ip=203.0.113.10
 is_dont_show_info=1
 is_dont_auto_exit=1
 mkdir -p "$is_conf_dir/.quan-meta"
-manage() { :; }
+manage_log="$case_dir/manage.log"
+: >"$manage_log"
+manage() { printf "%s\n" "$*" >>"$manage_log"; }
+is_port_used() { [[ ${TEST_ACTIVE_PORT:-} == "$1" ]] && printf "%s\n" "$1"; }
+
 get_snell_psk() { printf '%s\n' generated-psk; }
 
 [[ " ${protocol_list[*]} " == *' Snell '* ]] || fail "protocol_list should include Snell"
@@ -110,27 +114,54 @@ jq -e '
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
   add snell 41603 supplied-psk 6
-) >/tmp/snell-version.out 2>&1 && fail "unsupported Snell version should fail"
+) >"$case_dir/snell-version.out" 2>&1 && fail "unsupported Snell version should fail"
 [[ ! -f $is_conf_dir/snell-41603.json ]] || fail "unsupported version should not create target file"
 
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
   add snell 0 supplied-psk 5
-) >/tmp/snell-port-zero.out 2>&1 && fail "port 0 should fail"
+) >"$case_dir/snell-port-zero.out" 2>&1 && fail "port 0 should fail"
 [[ ! -f $is_conf_dir/snell-0.json ]] || fail "port 0 should not create target file"
 
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
   add snell 65536 supplied-psk 5
-) >/tmp/snell-port-high.out 2>&1 && fail "port 65536 should fail"
+) >"$case_dir/snell-port-high.out" 2>&1 && fail "port 65536 should fail"
 [[ ! -f $is_conf_dir/snell-65536.json ]] || fail "port 65536 should not create target file"
 
 jq -n '{inbounds:[{type:"vmess",listen_port:41604}]}' >"$is_conf_dir/existing.json"
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
   add snell 41604 supplied-psk 5
-) >/tmp/snell-conflict.out 2>&1 && fail "saved config port conflict should fail"
+) >"$case_dir/snell-conflict.out" 2>&1 && fail "saved config port conflict should fail"
 [[ ! -f $is_conf_dir/snell-41604.json ]] || fail "port conflict should not create target file"
+
+(
+  unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
+  TEST_ACTIVE_PORT=41610
+  add snell 41610 supplied-psk 5
+) >"$case_dir/snell-active-port.out" 2>&1 && fail "active listener port conflict should fail"
+[[ ! -f $is_conf_dir/snell-41610.json ]] || fail "active listener port conflict should not create target file"
+
+invalid_obfs_output=$(
+  snell_psk=supplied-psk
+  snell_version=5
+  snell_obfs_mode=quic
+  port=41611
+  is_core_ver=1.14.0
+  validate_snell
+) 2>&1
+[[ $? != 0 ]] || fail "unsupported obfs mode should fail"
+
+empty_psk_output=$(
+  snell_psk=
+  snell_version=5
+  snell_obfs_mode=none
+  port=41612
+  is_core_ver=1.14.0
+  validate_snell
+) 2>&1
+[[ $? != 0 ]] || fail "empty PSK should fail"
 
 version_output=$((
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
@@ -161,6 +192,58 @@ for malformed_case in "1.14garbage:41607" "1.14.0garbage:41608"; do
   [[ $malformed_output == *1.14.0* ]] || fail "$malformed_version failure should mention 1.14.0"
   [[ ! -f $is_conf_dir/snell-$malformed_port.json ]] || fail "$malformed_version should not create target file"
 done
+
+jq -n \
+  '{inbounds:[{tag:"snell-41601.json",type:"snell",listen:"::",listen_port:41601,version:5,psk:"old-psk",obfs_mode:"http"}]}' \
+  >"$is_conf_dir/snell-41601.json"
+jq -n '{node_name:"snell-node",entry_addr:"edge.example.com",outbound_mode:"V4优先"}' \
+  >"$is_conf_dir/.quan-meta/snell-41601.json.meta.json"
+
+is_dont_show_info=1
+info snell-41601.json
+[[ $is_protocol == snell ]] || fail "info should identify Snell protocol"
+[[ $port == 41601 ]] || fail "info should extract Snell port"
+[[ $snell_version == 5 ]] || fail "info should extract Snell version"
+[[ $snell_psk == old-psk ]] || fail "info should extract Snell PSK"
+[[ $snell_obfs_mode == http ]] || fail "info should extract Snell obfs mode"
+[[ -z ${is_url:-} ]] || fail "Snell info should not create a URL"
+old_is_dont_auto_exit=$is_dont_auto_exit
+is_dont_show_info=
+is_dont_auto_exit=
+info_output=$(info snell-41601.json)
+for label in "协议 (protocol)" "版本 (version)" "PSK" "混淆模式 (obfs_mode)"; do
+  [[ $info_output == *"$label"* ]] || fail "Snell info output should include $label"
+done
+is_dont_show_info=1
+is_dont_auto_exit=$old_is_dont_auto_exit
+
+change snell-41601.json psk new-psk || fail "Snell PSK change should succeed"
+[[ $(jq -r '.inbounds[0].psk' "$is_conf_dir/snell-41601.json") == new-psk ]] || fail "Snell PSK change was not saved"
+
+change snell-41601.json snell-version 5 || fail "Snell version change should succeed"
+[[ $(jq -r '.inbounds[0].version' "$is_conf_dir/snell-41601.json") == 5 ]] || fail "Snell version change was not saved"
+
+change snell-41601.json obfs none || fail "Snell obfs change should succeed"
+[[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == none ]] || fail "Snell obfs change was not saved"
+
+change snell-41601.json port 41606 || fail "Snell port change should succeed"
+[[ ! -f $is_conf_dir/snell-41601.json ]] || fail "old Snell port file should be removed after replacement"
+[[ -f $is_conf_dir/snell-41606.json ]] || fail "new Snell port file should exist after replacement"
+jq -e '.node_name == "snell-node" and .entry_addr == "edge.example.com" and .outbound_mode == "V4优先"' \
+  "$is_conf_dir/.quan-meta/snell-41606.json.meta.json" >/dev/null || fail "Snell metadata should move with port change"
+
+wait
+manage_before=$(wc -l <"$manage_log")
+failure_output=$( (change snell-41606.json psk reject-me) 2>&1 )
+[[ $? != 0 ]] || fail "rejected Snell replacement should fail"
+wait
+manage_after=$(wc -l <"$manage_log")
+[[ $manage_after == $manage_before ]] || fail "rejected replacement should not restart the service"
+[[ $(jq -r '.inbounds[0].psk' "$is_conf_dir/snell-41606.json") == new-psk ]] || fail "rejected replacement should preserve old JSON"
+[[ -f $is_conf_dir/.quan-meta/snell-41606.json.meta.json ]] || fail "rejected replacement should preserve metadata"
+if compgen -G "$is_conf_dir/.snell-*" >/dev/null; then
+  fail "rejected replacement should remove temporary files"
+fi
 CASE
 }
 
