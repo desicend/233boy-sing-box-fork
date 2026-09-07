@@ -2190,6 +2190,9 @@ footer_msg() {
 url_qr() {
     is_dont_show_info=1
     info $2
+    if [[ $is_protocol == snell ]]; then
+        err "Snell 暂不支持通用分享链接，请使用配置参数导入"
+    fi
     if [[ $is_url ]]; then
         [[ $1 == 'url' ]] && {
             msg "\n------------- $is_config_name & URL 链接 -------------"

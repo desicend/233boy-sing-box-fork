@@ -17,6 +17,7 @@
 - 一键添加 Trojan
 - 一键添加 Hysteria2
 - 一键添加 AnyTLS
+- 一键添加 Snell v5
 - 一键添加 Shadowsocks 2022
 - 一键添加 VMess-(TCP/HTTP/QUIC)
 - 一键添加 VMess-(WS/H2/HTTPUpgrade)-TLS
@@ -68,11 +69,13 @@ Usage: sing-box [options]... [args]...
 
 一般:
    a, add [protocol] [args... | auto]              添加配置
+   add snell [port] [psk] [version]                添加 Snell v5 (需要 sing-box >= 1.14.0)
    c, change [name] [option] [args... | auto]      更改配置
    d, del [name]                                   删除配置**
    i, info [name]                                  查看配置
    qr [name]                                       二维码信息
    url [name]                                      URL 信息
+   Snell 暂不支持通用分享链接，请使用配置参数导入
    log                                             查看日志
 更改:
    full [name] [...]                               更改多个参数
@@ -86,6 +89,9 @@ Usage: sing-box [options]... [args]...
    sni [name] [ ip | domain]                       更改 serverName
    new [name] [...]                                更改协议
    web [name] [domain]                             更改伪装网站
+   psk [name] [psk | auto]                         更改 Snell PSK
+   snell-version [name] [5 | auto]                更改 Snell 版本
+   obfs [name] [none | http | auto]               更改 Snell 混淆模式
 
 进阶:
    dns [...]                                       设置 DNS

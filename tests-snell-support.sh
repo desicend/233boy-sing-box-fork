@@ -249,10 +249,32 @@ manage_after=$(wc -l <"$manage_log")
 if compgen -G "$is_conf_dir/.snell-*" >/dev/null; then
   fail "rejected replacement should remove temporary files"
 fi
+
+url_output=$( (url_qr url snell-41606.json) 2>&1 )
+url_status=$?
+[[ $url_status != 0 ]] || fail "Snell URL command unexpectedly succeeded"
+[[ $url_output == *'Snell 暂不支持通用分享链接，请使用配置参数导入'* ]] || fail "Snell URL command should show parameter-import guidance"
+
+qr_output=$( (url_qr qr snell-41606.json) 2>&1 )
+qr_status=$?
+[[ $qr_status != 0 ]] || fail "Snell QR command unexpectedly succeeded"
+[[ $qr_output == *'Snell 暂不支持通用分享链接，请使用配置参数导入'* ]] || fail "Snell QR command should show parameter-import guidance"
+[[ $url_output != *'snell://'* ]] || fail "Snell URL output must not contain a snell:// URL"
+[[ $qr_output != *'snell://'* ]] || fail "Snell QR output must not contain a snell:// URL"
+
+del snell-41606.json
+[[ ! -e "$is_conf_dir/snell-41606.json" ]] || fail "Snell delete should remove the node JSON"
 CASE
 }
 
 run_core_case "$repo_root/core.sh" || exit 1
 run_core_case "$repo_root/src/core.sh" || exit 1
+
+grep -q 'Snell' "$repo_root/src/help.sh"
+grep -q 'add snell \[port\] \[psk\] \[version\]' "$repo_root/src/help.sh"
+grep -q '1.14.0' "$repo_root/src/help.sh"
+grep -q 'Snell' "$repo_root/README.md"
+grep -q 'add snell \[port\] \[psk\] \[version\]' "$repo_root/README.md"
+grep -q '1.14.0' "$repo_root/README.md"
 
 echo "PASS: Snell offline generation and validation coverage"
