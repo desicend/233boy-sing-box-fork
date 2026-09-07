@@ -102,6 +102,8 @@ esac
 
 Add a `run_core_case()` function that runs a fresh child shell for each of `core.sh` and `src/core.sh`, sources the selected file, overrides `is_conf_dir`, `is_config_json`, `is_core_bin`, `is_core_ver`, `ip`, and `manage()`, and creates `$is_conf_dir/.quan-meta`. Override `get_snell_psk()` in the test child to return `generated-psk`, so omission behavior is deterministic.
 
+Each independent create assertion must start with `unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name` (or run in its own child shell), so the omitted-PSK case cannot inherit state from the preceding explicit-PSK case.
+
 The first test cases must assert:
 
 ```bash
@@ -347,6 +349,9 @@ if [[ $previous_config_file && $previous_config_file != "$is_config_name" ]]; th
 fi
 is_config_file=$is_config_name
 sync_runtime_node_outbound_modes
+if [[ $is_new_install ]]; then
+    create config.json
+fi
 manage restart &
 return
 ```
