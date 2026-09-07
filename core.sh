@@ -238,7 +238,7 @@ snell_obfs_mode_valid() {
 
 require_snell_support() {
     local version=${is_core_ver#v} major minor
-    [[ $version =~ ^([0-9]+)\.([0-9]+) ]] || err "无法确认当前 sing-box 版本 ($is_core_ver), Snell 需要 sing-box 1.14.0 或更高版本."
+    [[ $version =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || err "无法确认当前 sing-box 版本 ($is_core_ver), Snell 需要 sing-box 1.14.0 或更高版本."
     major=${BASH_REMATCH[1]}
     minor=${BASH_REMATCH[2]}
     ((major > 1 || major == 1 && minor >= 14)) || err "当前 sing-box 版本 ($is_core_ver) 不支持 Snell, 请先升级 sing-box core 到 1.14.0 或更高版本."

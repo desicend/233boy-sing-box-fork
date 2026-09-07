@@ -149,6 +149,18 @@ unknown_output=$((
 [[ $? != 0 ]] || fail "unknown sing-box version should fail Snell creation"
 [[ $unknown_output == *1.14.0* ]] || fail "unknown version failure should mention 1.14.0"
 [[ ! -f $is_conf_dir/snell-41606.json ]] || fail "unknown core version should not create target file"
+for malformed_case in "1.14garbage:41607" "1.14.0garbage:41608"; do
+  malformed_version=${malformed_case%%:*}
+  malformed_port=${malformed_case##*:}
+  malformed_output=$( (
+    unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
+    is_core_ver=$malformed_version
+    add snell "$malformed_port" supplied-psk 5
+  ) 2>&1 )
+  [[ $? != 0 ]] || fail "$malformed_version should fail Snell creation"
+  [[ $malformed_output == *1.14.0* ]] || fail "$malformed_version failure should mention 1.14.0"
+  [[ ! -f $is_conf_dir/snell-$malformed_port.json ]] || fail "$malformed_version should not create target file"
+done
 CASE
 }
 
