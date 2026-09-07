@@ -101,6 +101,7 @@ protocol_list=(
     AnyTLS
     # Direct
     Socks
+    Snell
 )
 ss_method_list=(
     aes-128-gcm
@@ -218,6 +219,59 @@ pause() {
 get_uuid() {
     tmp_uuid=$(cat /proc/sys/kernel/random/uuid)
 }
+
+
+get_snell_psk() {
+    local psk
+    psk=$(openssl rand -base64 32 2>/dev/null | tr -d '\n') || return 1
+    [[ $psk ]] || return 1
+    printf '%s\n' "$psk"
+}
+
+snell_version_valid() {
+    [[ $1 == 5 ]]
+}
+
+snell_obfs_mode_valid() {
+    [[ $1 == none || $1 == http ]]
+}
+
+require_snell_support() {
+    local version=${is_core_ver#v} major minor
+    [[ $version =~ ^([0-9]+)\.([0-9]+) ]] || err "无法确认当前 sing-box 版本 ($is_core_ver), Snell 需要 sing-box 1.14.0 或更高版本."
+    major=${BASH_REMATCH[1]}
+    minor=${BASH_REMATCH[2]}
+    ((major > 1 || major == 1 && minor >= 14)) || err "当前 sing-box 版本 ($is_core_ver) 不支持 Snell, 请先升级 sing-box core 到 1.14.0 或更高版本."
+}
+
+snell_config_port_used() {
+    local wanted=$1 current=${2:-} file
+    shopt -s nullglob
+    for file in "$is_conf_dir"/*.json; do
+        [[ ${file##*/} == "$current" ]] && continue
+        jq -e --argjson port "$wanted" 'any(.inbounds[]?.listen_port?; . == $port)' "$file" >/dev/null 2>&1 && {
+            shopt -u nullglob
+            return 0
+        }
+    done
+    shopt -u nullglob
+    return 1
+}
+
+validate_snell() {
+    local current_port
+    require_snell_support
+    [[ $(is_test port "$port") ]] || err "($port) 不是一个有效的端口. $is_err_tips"
+    current_port=$(jq -r '.inbounds[0].listen_port // empty' "$is_conf_dir/${is_config_file:-missing}" 2>/dev/null)
+    if [[ $port != "$current_port" ]] && [[ $(is_test port_used "$port") ]]; then
+        err "无法使用 ($port) 端口. $is_err_tips"
+    fi
+    snell_config_port_used "$port" "${is_config_file:-}" && err "无法使用 ($port) 端口. $is_err_tips"
+    [[ $snell_psk ]] || err "Snell PSK 不能为空. $is_err_tips"
+    snell_version_valid "$snell_version" || err "Snell 版本目前只支持 5. $is_err_tips"
+    snell_obfs_mode_valid "$snell_obfs_mode" || err "Snell 混淆模式只支持 none 或 http. $is_err_tips"
+}
+
 
 get_ip() {
     [[ $ip || $is_no_auto_tls || $is_gen || $is_dont_get_ip ]] && return
@@ -714,20 +768,41 @@ sync_entry_addr_config() {
 create() {
     case $1 in
     server)
-        local preserved_node_name preserved_entry_addr preserved_outbound_mode preserved_outbound_ss_server preserved_outbound_ss_port preserved_outbound_ss_method preserved_outbound_ss_password preserved_outbound_ss_name previous_config_file
+        local preserved_node_name preserved_entry_addr preserved_outbound_mode preserved_outbound_ss_server preserved_outbound_ss_port preserved_outbound_ss_method preserved_outbound_ss_password preserved_outbound_ss_name previous_config_file is_snell_tmp_file
         is_tls=none
         get new
         # listen
         is_listen='listen: "::"'
         # file name: protocol + port
         is_config_name=${2}-${port}.json
+        [[ ${2,,} == snell ]] && is_config_name=snell-${port}.json
         [[ $host ]] && is_listen='listen: "127.0.0.1"'
         is_json_file=$is_conf_dir/$is_config_name
         # get json
         [[ $is_change || ! $json_str ]] && get protocol $2
         [[ $net == "reality" ]] && is_add_public_key=",outbounds:[{type:\"direct\"},{tag:\"public_key_$is_public_key\",type:\"direct\"}]"
-        is_new_json=$(jq "{inbounds:[{tag:\"$is_config_name\",type:\"$is_protocol\",$is_listen,listen_port:$port,$json_str}]$is_add_public_key}" <<<{})
-        [[ $is_test_json ]] && return # tmp test
+        if [[ ${2,,} == snell ]]; then
+            is_new_json=$(jq -n \
+                --arg tag "$is_config_name" \
+                --arg psk "$snell_psk" \
+                --arg obfs_mode "$snell_obfs_mode" \
+                --argjson port "$port" \
+                --argjson version "$snell_version" \
+                '{inbounds:[{tag:$tag,type:"snell",listen:"::",listen_port:$port,version:$version,psk:$psk,obfs_mode:$obfs_mode}]}')
+            is_snell_tmp_file=$(mktemp "$is_conf_dir/.snell-XXXXXX.json") || err "无法创建 Snell 临时配置文件."
+            printf '%s\n' "$is_new_json" >"$is_snell_tmp_file"
+            if ! "$is_core_bin" check -c "$is_snell_tmp_file" &>/dev/null; then
+                rm -f "$is_snell_tmp_file"
+                err "Snell 配置校验失败."
+            fi
+        else
+            is_new_json=$(jq "{inbounds:[{tag:\"$is_config_name\",type:\"$is_protocol\",$is_listen,listen_port:$port,$json_str}]$is_add_public_key}" <<<{})
+        fi
+        [[ $is_test_json ]] && {
+            rm -f "$is_snell_tmp_file"
+            return
+        }
+        rm -f "$is_snell_tmp_file"
         # only show json, dont save to file.
         [[ $is_gen ]] && {
             msg
@@ -1298,6 +1373,9 @@ add() {
         socks)
             is_new_protocol=Socks
             ;;
+        snell)
+            is_new_protocol=Snell
+            ;;
         *)
             for v in ${protocol_list[@]}; do
                 [[ $(grep -E -i "^$is_lower$" <<<$v) ]] && is_new_protocol=$v && break
@@ -1369,6 +1447,12 @@ add() {
         is_use_socks_pass=$4
         is_add_opts="[port] [username] [password]"
         ;;
+    snell)
+        is_use_port=$2
+        is_use_pass=$3
+        is_use_version=$4
+        is_add_opts="[port] [psk] [version]"
+        ;;
     esac
 
     [[ $1 && ! $is_change ]] && {
@@ -1403,7 +1487,7 @@ add() {
 
     # prefer args.
     if [[ $2 ]]; then
-        for v in is_use_port is_use_uuid is_use_host is_use_path is_use_pass is_use_method is_use_door_addr is_use_door_port; do
+        for v in is_use_port is_use_uuid is_use_host is_use_path is_use_pass is_use_method is_use_door_addr is_use_door_port is_use_version; do
             [[ ${!v} == 'auto' ]] && unset $v
         done
 
@@ -1451,7 +1535,15 @@ add() {
             }
             ss_method=$is_tmp_use_type
         fi
-        [[ $is_use_pass ]] && ss_password=$is_use_pass && password=$is_use_pass
+        if [[ $is_use_pass ]]; then
+            if [[ ${is_new_protocol,,} == snell ]]; then
+                snell_psk=$is_use_pass
+            else
+                ss_password=$is_use_pass
+                password=$is_use_pass
+            fi
+        fi
+        [[ $is_use_version ]] && snell_version=$is_use_version
         [[ $is_use_host ]] && host=$is_use_host
         [[ $is_use_door_addr ]] && door_addr=$is_use_door_addr
         [[ $is_use_servername ]] && is_servername=$is_use_servername
@@ -1526,6 +1618,14 @@ add() {
             esac
 
         fi
+    fi
+
+    if [[ ${is_new_protocol,,} == snell ]]; then
+        [[ ! $port ]] && get_port && port=$tmp_port
+        [[ ! $snell_psk ]] && snell_psk=$(get_snell_psk)
+        [[ ! $snell_version ]] && snell_version=5
+        [[ ! $snell_obfs_mode ]] && snell_obfs_mode=none
+        validate_snell
     fi
 
     # Dokodemo-Door
@@ -1742,6 +1842,12 @@ get() {
             [[ ! $is_socks_user ]] && is_socks_user=233boy
             [[ ! $is_socks_pass ]] && is_socks_pass=$uuid
             json_str="users:[{username: \"$is_socks_user\", password: \"$is_socks_pass\"}]"
+            ;;
+        snell*)
+            net=snell
+            is_protocol=snell
+            [[ $snell_version ]] || snell_version=5
+            [[ $snell_obfs_mode ]] || snell_obfs_mode=none
             ;;
         *)
             err "无法识别协议: $is_config_file"
