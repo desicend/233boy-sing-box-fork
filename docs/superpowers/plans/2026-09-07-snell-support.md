@@ -389,3 +389,140 @@ git commit -m "feat: manage Snell fields atomically"
 
 **Interfaces:**
 - Consumes the Snell info state and no-URL behavior from Task 2.
+
+- Produces the exact user-facing unsupported URL/QR behavior and documented command surface.
+
+- [ ] **Step 1: Write failing URL/QR, deletion, and documentation assertions.**
+
+Add to the test matrix after the atomic replacement assertions:
+
+```bash
+url_output=$( (url_qr url snell-41606.json) 2>&1 )
+url_status=$?
+[[ $url_status != 0 ]] || fail "Snell URL command unexpectedly succeeded"
+[[ $url_output == *'Snell 暂不支持通用分享链接，请使用配置参数导入'* ]] || fail "Snell URL command should show parameter-import guidance"
+
+qr_output=$( (url_qr qr snell-41606.json) 2>&1 )
+qr_status=$?
+[[ $qr_status != 0 ]] || fail "Snell QR command unexpectedly succeeded"
+[[ $qr_output == *'Snell 暂不支持通用分享链接，请使用配置参数导入'* ]] || fail "Snell QR command should show parameter-import guidance"
+[[ $url_output != *'snell://'* ]] || fail "Snell URL output must not contain a snell:// URL"
+[[ $qr_output != *'snell://'* ]] || fail "Snell QR output must not contain a snell:// URL"
+
+del snell-41606.json
+[[ ! -e "$is_conf_dir/snell-41606.json" ]] || fail "Snell delete should remove the node JSON"
+```
+
+Add repository assertions:
+
+```bash
+grep -q 'Snell' src/help.sh
+grep -q 'add snell \[port\] \[psk\] \[version\]' src/help.sh
+grep -q '1.14.0' src/help.sh
+grep -q 'Snell' README.md
+grep -q 'add snell \[port\] \[psk\] \[version\]' README.md
+grep -q '1.14.0' README.md
+```
+
+- [ ] **Step 2: Run the test to verify the new cases fail.**
+
+Run:
+
+```bash
+./tests-snell-support.sh
+```
+
+Expected: the URL and QR cases fail because `url_qr()` still emits the generic no-URL errors, and the help/README assertions fail because Snell is not documented yet. If the test stops before these assertions, correct only the test setup until it reaches the expected missing-behavior failure.
+
+- [ ] **Step 3: Add the explicit Snell URL/QR guard.**
+
+In both `url_qr()` functions, immediately after `info $2` and before the generic `if [[ $is_url ]]` branch, add:
+
+```bash
+if [[ $is_protocol == snell ]]; then
+    err "Snell 暂不支持通用分享链接，请使用配置参数导入"
+fi
+```
+
+Do not assign a URL in the Snell `info` case. This ensures neither `qrencode` nor the external QR page receives Snell credentials.
+
+- [ ] **Step 4: Update help and README text.**
+
+In `src/help.sh`, add a general-help line immediately after the generic add line:
+
+```text
+   add snell [port] [psk] [version]                添加 Snell v5 (需要 sing-box >= 1.14.0)
+```
+
+Add change lines for `psk`, `snell-version`, and `obfs`, including their accepted values, and add a note that Snell URL/QR are unavailable and parameter import is required. Mirror the command, version, and parameter-only import text in the static help block in `README.md`. Add `- 一键添加 Snell v5` to the README feature list.
+
+- [ ] **Step 5: Run URL/QR, deletion, and documentation tests.**
+
+Run:
+
+```bash
+./tests-snell-support.sh
+```
+
+Expected: both URL and QR commands fail with the exact parameter-import message, neither output contains `snell://`, deletion removes the node JSON, and all help/README assertions pass for both core script cases.
+
+- [ ] **Step 6: Run syntax and diff checks, then commit.**
+
+```bash
+bash -n core.sh
+bash -n src/core.sh
+bash -n tests-snell-support.sh
+git diff --check
+git add tests-snell-support.sh core.sh src/core.sh src/help.sh README.md
+git commit -m "docs: document Snell management commands"
+```
+
+### Task 4: Full Verification and Release-Artifact Audit
+
+**Files:**
+- Modify: none unless a verification failure identifies a required correction.
+- Verify: `core.sh`, `src/core.sh`, `src/help.sh`, `README.md`, `tests-snell-support.sh`, and `.github/workflows/release.yml`.
+
+**Interfaces:**
+- Consumes all implementation slices from Tasks 1-3.
+- Produces final evidence that both packaged core copies support the same Snell behavior and no unrelated files changed.
+
+- [ ] **Step 1: Run the complete automated verification set.**
+
+Run:
+
+```bash
+bash -n core.sh
+bash -n src/core.sh
+bash -n tests-snell-support.sh
+./tests-snell-support.sh
+./tests-node-name-label.sh
+git diff --check
+git status --short --branch
+```
+
+Expected: syntax checks, `tests-snell-support.sh`, and `git diff --check` pass. `tests-node-name-label.sh` may still fail in an offline environment at its pre-existing public-IP lookup; record that exact failure rather than weakening the test or claiming a full pass.
+
+- [ ] **Step 2: Verify the release package includes both implementations and the new test/docs.**
+
+Run:
+
+```bash
+rg -n 'tar zcvf code.tar.gz install.sh core.sh sing-box.sh src LICENSE README.md' .github/workflows/release.yml
+rg -n 'Snell|snell' core.sh src/core.sh src/help.sh README.md tests-snell-support.sh
+```
+
+- [ ] **Step 3: Review the final diff for scope and duplicate-file parity.**
+
+Run:
+
+```bash
+git diff HEAD~3 --stat
+git diff HEAD~3 -- core.sh src/core.sh src/help.sh README.md tests-snell-support.sh
+```
+
+Check that Snell-specific branches are behaviorally identical in `core.sh` and `src/core.sh`, unrelated root/source differences remain intact, and all temporary test files are removed by traps.
+
+- [ ] **Step 4: Record manual acceptance requirements.**
+
+On a host with sing-box `1.14.0` or newer, run `sing-box add snell`, inspect the generated JSON, run `sing-box check`, restart the service, verify TCP and UDP listening behavior, and connect with one real Snell v5 client. Record these as environment-dependent acceptance results; do not mark them as local automated test results.
