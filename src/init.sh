@@ -115,7 +115,7 @@ is_tls_key=$is_core_dir/bin/tls.key
     rm $is_tls_tmp
 }
 
-if [[ $(pgrep -f $is_core_bin 2>/dev/null || grep -l "$is_core_bin" /proc/*/cmdline 2>/dev/null) ]]; then
+if [[ $(pgrep -f $is_core_bin) ]]; then
     is_core_status=$(_green running)
 else
     is_core_status=$(_red_bg stopped)
@@ -135,7 +135,7 @@ if [[ -f $is_caddy_bin && -d $is_caddy_dir && $is_caddy_service ]]; then
     is_tmp_https_port=$(grep -E '^ {2,}https_port|^https_port' $is_caddyfile | grep -E -o [0-9]+)
     [[ $is_tmp_http_port ]] && is_http_port=$is_tmp_http_port
     [[ $is_tmp_https_port ]] && is_https_port=$is_tmp_https_port
-    if [[ $(pgrep -f $is_caddy_bin 2>/dev/null || grep -l "$is_caddy_bin" /proc/*/cmdline 2>/dev/null) ]]; then
+    if [[ $(pgrep -f $is_caddy_bin) ]]; then
         is_caddy_status=$(_green running)
     else
         is_caddy_status=$(_red_bg stopped)
