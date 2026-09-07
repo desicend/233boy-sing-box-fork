@@ -226,6 +226,35 @@ get_uuid() {
     tmp_uuid=$(cat /proc/sys/kernel/random/uuid)
 }
 
+json_strip_comments() {
+    awk '
+    {
+        line = ""
+        in_string = 0
+        escaped = 0
+        for (i = 1; i <= length($0); i++) {
+            char = substr($0, i, 1)
+            if (in_string) {
+                line = line char
+                if (escaped) {
+                    escaped = 0
+                } else if (char == "\\") {
+                    escaped = 1
+                } else if (char == "\"") {
+                    in_string = 0
+                }
+            } else if (char == "\"") {
+                in_string = 1
+                line = line char
+            } else if (char == "/" && substr($0, i + 1, 1) == "/") {
+                break
+            } else {
+                line = line char
+            }
+        }
+        print line
+    }' "$1"
+}
 
 get_snell_psk() {
     local psk
@@ -251,16 +280,29 @@ require_snell_support() {
 }
 
 snell_config_port_used() {
-    local wanted=$1 current=${2:-} file
+    local wanted=$1 current=${2:-} file nullglob_was_set
+    if shopt -q nullglob; then
+        nullglob_was_set=1
+    else
+        nullglob_was_set=0
+    fi
     shopt -s nullglob
     for file in "$is_conf_dir"/*.json; do
         [[ ${file##*/} == "$current" ]] && continue
-        jq -e --argjson port "$wanted" 'any(.inbounds[]?.listen_port?; . == $port)' "$file" >/dev/null 2>&1 && {
-            shopt -u nullglob
+        if jq -e --argjson port "$wanted" 'any(.inbounds[]?.listen_port?; . == $port)' "$file" >/dev/null 2>&1; then
+            if ((nullglob_was_set)); then
+                shopt -s nullglob
+            else
+                shopt -u nullglob
+            fi
             return 0
-        }
+        fi
     done
-    shopt -u nullglob
+    if ((nullglob_was_set)); then
+        shopt -s nullglob
+    else
+        shopt -u nullglob
+    fi
     return 1
 }
 
@@ -1772,9 +1814,10 @@ get() {
         }
         ;;
     info)
+        is_tcp_http=
         get file $2
         if [[ $is_config_file ]]; then
-            is_json_str=$(cat $is_conf_dir/"$is_config_file" | sed s#//.*##)
+            is_json_str=$(json_strip_comments "$is_conf_dir/$is_config_file")
             is_json_data=$(jq -r '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag,.inbounds[0].version,.inbounds[0].psk,.inbounds[0].obfs_mode)' <<<$is_json_str)
             [[ $? != 0 ]] && err "无法读取此文件: $is_config_file"
             is_up_var_set=(null is_protocol port is_listen_addr uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key snell_version snell_psk snell_obfs_mode)
@@ -2136,7 +2179,7 @@ info() {
     snell)
         is_can_change=(0 1 13 14 15 17 18 19)
         is_info_show=(0 1 2 22 23 24)
-        is_info_str=($is_protocol $is_addr $port $snell_version $snell_psk $snell_obfs_mode)
+        is_info_str=("$is_protocol" "$is_addr" "$port" "$snell_version" "$snell_psk" "$snell_obfs_mode")
         is_url=
         ;;
     direct)
@@ -2515,5 +2558,3 @@ main() {
         ;;
     esac
 }
-
-

@@ -136,6 +136,15 @@ jq -n '{inbounds:[{type:"vmess",listen_port:41604}]}' >"$is_conf_dir/existing.js
 ) >"$case_dir/snell-conflict.out" 2>&1 && fail "saved config port conflict should fail"
 [[ ! -f $is_conf_dir/snell-41604.json ]] || fail "port conflict should not create target file"
 
+shopt -s nullglob
+snell_config_port_used 41604 || fail "saved config port should be detected"
+shopt -q nullglob || fail "snell_config_port_used should restore enabled nullglob on a match"
+shopt -u nullglob
+if snell_config_port_used 41699; then
+  fail "unused saved config port should not be detected"
+fi
+shopt -q nullglob && fail "snell_config_port_used should restore disabled nullglob after no match"
+
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
   TEST_ACTIVE_PORT=41610
@@ -217,6 +226,36 @@ done
 is_dont_show_info=1
 is_dont_auto_exit=$old_is_dont_auto_exit
 
+slash_psk='foo//bar'
+(
+  unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
+  add snell 41613 "$slash_psk" 5
+) || fail "Snell should create a config with // in its PSK"
+printf '%s\n' '// trailing config comment' >>"$is_conf_dir/snell-41613.json"
+slash_info_output=$( (
+  is_dont_show_info=1
+  info snell-41613.json
+  printf 'PSK=%s\n' "$snell_psk"
+) 2>&1 )
+slash_info_status=$?
+[[ $slash_info_status == 0 ]] || fail "Snell info should preserve // inside a PSK"
+[[ $slash_info_output == *"PSK=$slash_psk"* ]] || fail "Snell info should display the complete // PSK"
+change snell-41613.json obfs http || fail "Snell change should preserve a PSK containing //"
+jq -e --arg psk "$slash_psk" '.inbounds[0].psk == $psk and .inbounds[0].obfs_mode == "http"' \
+  "$is_conf_dir/snell-41613.json" >/dev/null || fail "Snell change should retain the complete // PSK"
+
+display_psk='psk with spaces'
+(
+  unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
+  add snell 41614 "$display_psk" 5
+) || fail "Snell should create a config with spaces in its PSK"
+display_output=$( (
+  is_dont_show_info=
+  is_dont_auto_exit=
+  info snell-41614.json
+) 2>&1 )
+[[ $display_output == *"$display_psk"* ]] || fail "Snell info should display a spaced PSK as one value"
+
 change snell-41601.json psk new-psk || fail "Snell PSK change should succeed"
 [[ $(jq -r '.inbounds[0].psk' "$is_conf_dir/snell-41601.json") == new-psk ]] || fail "Snell PSK change was not saved"
 
@@ -264,6 +303,17 @@ qr_status=$?
 
 del snell-41606.json
 [[ ! -e "$is_conf_dir/snell-41606.json" ]] || fail "Snell delete should remove the node JSON"
+
+rm -f "$is_conf_dir"/*.json "$is_conf_dir/.quan-meta"/*.meta.json
+jq -n '{inbounds:[{tag:"http-41615.json",type:"vmess",listen:"::",listen_port:41615,users:[{uuid:"00000000-0000-4000-8000-000000000015"}],transport:{type:"http"}}]}' \
+  >"$is_conf_dir/http-41615.json"
+jq -n '{inbounds:[{tag:"snell-41616.json",type:"snell",listen:"::",listen_port:41616,version:5,psk:"fix-psk",obfs_mode:"none"}]}' \
+  >"$is_conf_dir/snell-41616.json"
+fix_all_output=$( (main fix-all) 2>&1 )
+fix_all_status=$?
+[[ $fix_all_status == 0 ]] || fail "fix-all should process HTTP before Snell"
+jq -e '.inbounds[0].type == "snell" and .inbounds[0].psk == "fix-psk"' \
+  "$is_conf_dir/snell-41616.json" >/dev/null || fail "fix-all should keep the later Snell node as Snell"
 CASE
 }
 
