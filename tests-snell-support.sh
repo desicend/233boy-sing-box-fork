@@ -347,6 +347,9 @@ change snell-41601.json mode http || fail "change mode on v5 node should route t
 [[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == http ]] || fail "v5 obfs was not updated via mode"
 change snell-41601.json mode none || fail "change mode none on v5 node should route to obfs"
 [[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == none ]] || fail "v5 obfs was not reset"
+change snell-41601.json mode http || fail "set obfs http on v5 node should succeed"
+change snell-41601.json mode default || fail "change mode default on v5 node should adapt to none"
+[[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == none ]] || fail "v5 obfs was not adapted to none via mode default"
 
 # Test smart routing: change obfs with mode value on v6 node updates mode
 change snell-41622.json obfs unsafe-raw || fail "change obfs with unsafe-raw on v6 node should update mode"
@@ -355,6 +358,9 @@ change snell-41622.json obfs unsafe-raw || fail "change obfs with unsafe-raw on 
 # Test smart routing: change obfs with none/http on v6 node adapts to default mode
 change snell-41622.json obfs http || fail "change obfs with http on v6 node should adapt"
 [[ $(jq -r '.inbounds[0].mode' "$is_conf_dir/snell-41622.json") == default ]] || fail "v6 mode was not adapted to default"
+change snell-41622.json mode unshaped || fail "set mode unshaped on v6 node should succeed"
+change snell-41622.json obfs auto || fail "change obfs auto on v6 node should adapt to default"
+[[ $(jq -r '.inbounds[0].mode' "$is_conf_dir/snell-41622.json") == default ]] || fail "v6 mode was not adapted to default via obfs auto"
 
 # Test v6 PSK change rejects < 12 characters
 (change snell-41622.json psk tooshort) >"$case_dir/v6-short-psk.out" 2>&1 && fail "v6 PSK change < 12 chars should fail"
@@ -452,11 +458,20 @@ jq -n '{inbounds:[{tag:"http-41615.json",type:"vmess",listen:"::",listen_port:41
   >"$is_conf_dir/http-41615.json"
 jq -n '{inbounds:[{tag:"snell-41616.json",type:"snell",listen:"::",listen_port:41616,version:5,psk:"fix-psk",obfs_mode:"none"}]}' \
   >"$is_conf_dir/snell-41616.json"
+jq -n '{inbounds:[{tag:"snell-41617.json",type:"snell",listen:"::",listen_port:41617,version:6,psk:"v6-fix-psk-1234",mode:"unshaped"}]}' \
+  >"$is_conf_dir/snell-41617.json"
 fix_all_output=$( (main fix-all) 2>&1 )
 fix_all_status=$?
 [[ $fix_all_status == 0 ]] || fail "fix-all should process HTTP before Snell"
 jq -e '.inbounds[0].type == "snell" and .inbounds[0].psk == "fix-psk"' \
   "$is_conf_dir/snell-41616.json" >/dev/null || fail "fix-all should keep the later Snell node as Snell"
+jq -e '
+  .inbounds[0].type == "snell"
+  and .inbounds[0].version == 6
+  and .inbounds[0].mode == "unshaped"
+  and .inbounds[0].psk == "v6-fix-psk-1234"
+  and (.inbounds[0] | has("obfs_mode") | not)
+' "$is_conf_dir/snell-41617.json" >/dev/null || fail "fix-all should preserve Snell v6 configuration"
 CASE
 }
 

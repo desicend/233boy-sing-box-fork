@@ -970,6 +970,7 @@ create() {
 change() {
     is_change=1
     is_dont_show_info=1
+    is_auto=
     if [[ $2 ]]; then
         case ${2,,} in
         full)
@@ -1060,7 +1061,7 @@ change() {
     [[ $host ]] && net=$is_protocol-$net-tls
     [[ $is_reality && $net_type =~ 'http' ]] && net=rh2
 
-    [[ $3 == 'auto' ]] && is_auto=1
+    [[ $3 == 'auto' ]] && is_auto=1 || is_auto=
     # if is_dont_show_info exist, cant show info.
     is_dont_show_info=
     # if not prefer args, show change list and then get change id.
@@ -1334,7 +1335,7 @@ change() {
                 add snell
                 return
             fi
-            if [[ $3 == 'none' || $3 == 'http' ]]; then
+            if [[ $3 == 'auto' || $3 == 'none' || $3 == 'http' ]]; then
                 warn "当前为 Snell v6 节点，不支持混淆模式 (obfs_mode)，已自动转换为默认运行模式 (mode: default)."
                 snell_mode=default
                 add snell
@@ -1379,12 +1380,19 @@ change() {
         fi
         if [[ $snell_version == 5 ]]; then
             # smart routing for v5 node
-            is_new_snell_obfs_mode=$3
-            [[ $is_new_snell_obfs_mode == auto ]] && is_new_snell_obfs_mode=none
-            if [[ ! $is_new_snell_obfs_mode || ! $is_new_snell_obfs_mode =~ ^(none|http)$ ]]; then
-                is_tmp_list=(none http)
-                ask list is_new_snell_obfs_mode "${is_tmp_list[*]}" "\n当前为 Snell v5 节点，请选择混淆模式:\n"
+            if [[ $3 =~ ^(none|http)$ ]]; then
+                snell_obfs_mode=$3
+                add snell
+                return
             fi
+            if [[ $3 == 'auto' || $3 =~ ^(default|unshaped|unsafe-raw)$ ]]; then
+                warn "当前为 Snell v5 节点，不支持运行模式 (mode)，已自动转换为默认混淆模式 (obfs_mode: none)."
+                snell_obfs_mode=none
+                add snell
+                return
+            fi
+            is_tmp_list=(none http)
+            ask list is_new_snell_obfs_mode "${is_tmp_list[*]}" "\n当前为 Snell v5 节点，请选择混淆模式:\n"
             snell_obfs_mode=$is_new_snell_obfs_mode
             add snell
             return
