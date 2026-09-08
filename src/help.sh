@@ -23,7 +23,7 @@ show_help() {
             "   i, info [name]                                  查看配置"
             "   qr [name]                                       二维码信息"
             "   url [name]                                      URL 信息"
-            "   Snell 暂不支持通用分享链接，请使用配置参数导入"
+            "   Snell 提供 sing-box URI 与 Surge 配置双格式导出 (不支持二维码)"
             "   log                                             查看日志"
             # "   logerr                                          查看错误日志\n"
             "更改:"
