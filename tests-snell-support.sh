@@ -466,8 +466,10 @@ run_core_case "$repo_root/src/core.sh" || exit 1
 grep -q 'Snell' "$repo_root/src/help.sh" || fail "src/help.sh should document Snell"
 grep -q 'add snell \[port\] \[psk\] \[version\]' "$repo_root/src/help.sh" || fail "src/help.sh should document Snell add syntax"
 grep -q '1.14.0' "$repo_root/src/help.sh" || fail "src/help.sh should document the Snell version floor"
+grep -q 'mode \[name\]' "$repo_root/src/help.sh" || fail "src/help.sh should document mode command"
 grep -q 'Snell' "$repo_root/README.md" || fail "README.md should document Snell"
 grep -q 'add snell \[port\] \[psk\] \[version\]' "$repo_root/README.md" || fail "README.md should document Snell add syntax"
 grep -q '1.14.0' "$repo_root/README.md" || fail "README.md should document the Snell version floor"
+grep -q 'Snell v6' "$repo_root/README.md" || fail "README.md should document Snell v6"
 
 echo "PASS: Snell offline generation and validation coverage"

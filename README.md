@@ -17,7 +17,7 @@
 - 一键添加 Trojan
 - 一键添加 Hysteria2
 - 一键添加 AnyTLS
-- 一键添加 Snell v5 (支持双格式导出 sing-box URI 链接与 Surge 代理配置)
+- 一键添加 Snell v6 (默认, PSK 需 12-255 位, 支持 default/unshaped/unsafe-raw 运行模式, 向后兼容 v5, 支持双格式导出 sing-box URI 链接与 Surge 代理配置)
 - 一键添加端口中转 (原生 direct 极速转发, 支持 TCP/UDP 双协议, 回车自动分配端口)
 - 支持交互式主菜单与快捷命令行双模式管理 (直接运行 sing-box 即可操作)
 - 一键添加 Shadowsocks 2022
@@ -27,7 +27,7 @@
 - 一键添加 Trojan-(WS/H2/HTTPUpgrade)-TLS
 - 一键启用 BBR
 - 一键更改伪装网站
-- 一键更改 (端口/UUID/密码/域名/路径/加密方式/SNI/PSK/混淆等...)
+- 一键更改 (端口/UUID/密码/域名/路径/加密方式/SNI/PSK/运行模式/混淆等...)
 - 还有更多...
 
 # 设计理念
@@ -71,7 +71,7 @@ Usage: sing-box [options]... [args]...
 
 一般:
    a, add [protocol] [args... | auto]              添加配置
-   add snell [port] [psk] [version]                添加 Snell v5 (需要 sing-box >= 1.14.0)
+   add snell [port] [psk] [version]                添加 Snell (默认 v6, 支持 v5, 需要 sing-box >= 1.14.0)
    c, change [name] [option] [args... | auto]      更改配置
    d, del [name]                                   删除配置**
    i, info [name]                                  查看配置
@@ -92,8 +92,9 @@ Usage: sing-box [options]... [args]...
    new [name] [...]                                更改协议
    web [name] [domain]                             更改伪装网站
    psk [name] [psk | auto]                         更改 Snell PSK
-   snell-version [name] [5 | auto]                更改 Snell 版本
-   obfs [name] [none | http | auto]               更改 Snell 混淆模式
+   snell-version [name] [6 | 5 | auto]             更改 Snell 版本
+   mode [name] [default | unshaped | unsafe-raw | auto] 更改 Snell 运行模式 (v6)
+   obfs [name] [none | http | auto]                更改 Snell 混淆模式 (v5)
 
 进阶:
    dns [...]                                       设置 DNS
