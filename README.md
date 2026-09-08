@@ -47,7 +47,7 @@
 # 一键安装
 
 ```bash
-bash <(wget -qO- -o- https://github.com/desicend/233boy-sing-box-fork/raw/main/install.sh)
+bash <(wget -qO- -o- https://github.com/ouones/one-singbox/raw/main/install.sh)
 ```
 
 # 文档
