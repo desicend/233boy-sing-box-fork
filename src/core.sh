@@ -2474,10 +2474,84 @@ relay_add() {
     relay_warn_security
 }
 
+relay_info() {
+    local local_port=$1
+    if [[ ! $local_port ]]; then
+        relay_list
+        ask string local_port "请输入要查看的中转本地端口:"
+    fi
+    local_port=${local_port#relay-}
+    local_port=${local_port%.json}
+    local relay_file="$is_conf_dir/relay-${local_port}.json"
+    [[ -f $relay_file ]] || err "未找到中转配置 (relay-${local_port}.json)."
+    local r_addr r_port
+    r_addr=$(jq -r '.inbounds[0].override_address // empty' "$relay_file")
+    r_port=$(jq -r '.inbounds[0].override_port // empty' "$relay_file")
+    msg "\n------------- 中转配置信息 -------------"
+    relay_info_show "$local_port" "$r_addr" "$r_port"
+    msg "----------------------------------------"
+    relay_warn_security
+}
+
+relay_list() {
+    local files count=0 file l_port r_addr r_port
+    shopt -s nullglob
+    files=("$is_conf_dir"/relay-*.json)
+    shopt -u nullglob
+    if [[ ${#files[@]} -eq 0 ]]; then
+        msg "\n当前未配置任何中转.\n"
+        return
+    fi
+    msg "\n------------- 中转列表 -------------"
+    for file in "${files[@]}"; do
+        l_port=$(jq -r '.inbounds[0].listen_port // empty' "$file")
+        r_addr=$(jq -r '.inbounds[0].override_address // empty' "$file")
+        r_port=$(jq -r '.inbounds[0].override_port // empty' "$file")
+        msg "本地端口: $l_port -> 目标: $r_addr:$r_port (network: tcp,udp)"
+        ((count++))
+    done
+    msg "------------------------------------"
+    msg "共 $count 个中转"
+    relay_warn_security
+}
+
+relay_delete() {
+    local local_port=$1 relay_file backup_file
+    if [[ ! $local_port ]]; then
+        relay_list
+        ask string local_port "请输入要删除的中转本地端口:"
+    fi
+    local_port=${local_port#relay-}
+    local_port=${local_port%.json}
+    relay_file="$is_conf_dir/relay-${local_port}.json"
+    [[ -f $relay_file ]] || err "未找到中转配置 (relay-${local_port}.json)."
+    backup_file="$is_conf_dir/.relay-${local_port}.json.bak"
+    mv -f "$relay_file" "$backup_file" || err "备份中转配置失败，未执行删除."
+    if [[ -f $is_config_json ]]; then
+        if ! "$is_core_bin" check -c "$is_config_json" -C "$is_conf_dir" &>/dev/null; then
+            mv -f "$backup_file" "$relay_file"
+            err "删除中转后完整运行时配置校验失败，已恢复中转配置."
+        fi
+    fi
+    rm -f "$backup_file"
+    [[ -f $is_config_json ]] && sync_runtime_node_outbound_modes
+    manage restart &
+    _green "\n已删除中转配置: relay-${local_port}.json\n"
+}
+
 relay_main() {
     case ${1:-} in
     add)
         relay_add "${@:2}"
+        ;;
+    list)
+        relay_list
+        ;;
+    info)
+        relay_info "${@:2}"
+        ;;
+    del | delete | rm)
+        relay_delete "${@:2}"
         ;;
     *)
         err "无法识别中转命令 (${1:-}), 正确用法: $is_core relay [add|list|info|delete]"
@@ -2536,6 +2610,7 @@ main() {
             for is_json_file in "$is_conf_dir"/*.json; do
                 v=${is_json_file##*/}
                 [[ $v =~ dynamic-port-.*-link ]] && continue
+                [[ $v == relay-*.json ]] && continue
                 msg "fix: $v"
                 change "$v" full
             done

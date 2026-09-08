@@ -160,10 +160,51 @@ config_port_used 10000 || fail "config_port_used should detect relay port"
 snell_config_port_used 10006 || fail "snell_config_port_used wrapper should detect vless port"
 ! config_port_used 59999 || fail "unused port should return 1"
 
+# 8. relay info output format
+info_out=$(main relay info 10000)
+[[ $info_out == *"type = direct"* ]] || fail "relay info should contain type = direct"
+[[ $info_out == *"listen = ::"* ]] || fail "relay info should contain listen = ::"
+[[ $info_out == *"listen_port = 10000"* ]] || fail "relay info should contain listen_port = 10000"
+[[ $info_out == *"override_address = 203.0.113.10"* ]] || fail "relay info should contain override_address"
+[[ $info_out == *"override_port = 20000"* ]] || fail "relay info should contain override_port"
+[[ $info_out == *"network = tcp,udp"* ]] || fail "relay info should report network = tcp,udp"
+[[ $info_out == *"防火墙"* || $info_out == *"ACL"* ]] || fail "relay info should include security warning"
+[[ $info_out != *"http"* && $info_out != *"vmess"* ]] || fail "relay info should not include share links"
+
+# 9. relay list output
+list_out=$(main relay list)
+[[ $list_out == *"10000"* && $list_out == *"203.0.113.10"* && $list_out == *"20000"* ]] || fail "relay list should show relay 10000"
+[[ $list_out == *"10001"* && $list_out == *"2001:db8::1"* ]] || fail "relay list should show relay 10001"
+[[ $list_out == *"tcp,udp"* ]] || fail "relay list should report tcp,udp"
+[[ $list_out == *"防火墙"* || $list_out == *"ACL"* ]] || fail "relay list should include security warning"
+
+# 10. fix-all skips relay files
+rm -f "$is_conf_dir/vless-10006.json"
+jq -n '{inbounds:[{tag:"http-41615.json",type:"vmess",listen:"::",listen_port:41615,users:[{uuid:"00000000-0000-4000-8000-000000000015"}],transport:{type:"http"}}]}' \
+  >"$is_conf_dir/http-41615.json"
+content_before=$(cat "$is_conf_dir/relay-10000.json")
+main fix-all >/dev/null 2>&1
+content_after=$(cat "$is_conf_dir/relay-10000.json")
+[[ "$content_before" == "$content_after" ]] || fail "fix-all must not alter relay-*.json"
+
+# 11. relay delete rollback on complete config failure
+export TEST_REJECT_COMPLETE=1
+(main relay delete 10000) >/dev/null 2>&1 && fail "relay delete should fail when complete config check fails"
+[[ -f "$is_conf_dir/relay-10000.json" ]] || fail "relay file should be restored after delete check failure"
+unset TEST_REJECT_COMPLETE
+
+# 12. relay delete success
+restart_count_before=$(grep -c "restart" "$manage_log" || true)
+(main relay delete 10000) >/dev/null 2>&1 || fail "relay delete 10000 should succeed"
+[[ ! -f "$is_conf_dir/relay-10000.json" ]] || fail "relay-10000.json should be deleted"
+restart_count_after=$(grep -c "restart" "$manage_log" || true)
+(( restart_count_after > restart_count_before )) || fail "manage restart should be called on delete"
+[[ -f "$is_conf_dir/relay-10001.json" ]] || fail "other relay files should not be deleted"
+
 CASE
 }
 
 run_core_case "$repo_root/core.sh"
 run_core_case "$repo_root/src/core.sh"
 
-echo "PASS: Task 1 relay add generation and validation coverage"
+echo "PASS: Task 2 relay list, info, delete, and fix-all coverage"
