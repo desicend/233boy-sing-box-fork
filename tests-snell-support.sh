@@ -214,8 +214,10 @@ info snell-41601.json
 [[ $port == 41601 ]] || fail "info should extract Snell port"
 [[ $snell_version == 5 ]] || fail "info should extract Snell version"
 [[ $snell_psk == old-psk ]] || fail "info should extract Snell PSK"
-[[ $snell_obfs_mode == http ]] || fail "info should extract Snell obfs mode"
-[[ -z ${is_url:-} ]] || fail "Snell info should not create a URL"
+[[ -n ${is_url:-} ]] || fail "Snell info should create a URL"
+[[ $is_url == *"snell://old-psk@edge.example.com:41601?version=5&obfs=http#snell-node"* ]] || fail "Snell is_url mismatch: $is_url"
+[[ -n ${is_surge_str:-} ]] || fail "Snell info should create a Surge configuration line"
+[[ $is_surge_str == *"snell-node = snell, edge.example.com, 41601, psk=old-psk, version=5, obfs=http"* ]] || fail "Snell is_surge_str mismatch: $is_surge_str"
 old_is_dont_auto_exit=$is_dont_auto_exit
 is_dont_show_info=
 is_dont_auto_exit=
@@ -289,17 +291,32 @@ if compgen -G "$is_conf_dir/.snell-*" >/dev/null; then
   fail "rejected replacement should remove temporary files"
 fi
 
+# Info display check for Snell
+old_is_dont_auto_exit=$is_dont_auto_exit
+is_dont_show_info=
+is_dont_auto_exit=
+info_output=$( (info snell-41606.json) 2>&1 )
+is_dont_show_info=1
+is_dont_auto_exit=$old_is_dont_auto_exit
+[[ $info_output == *"snell://new-psk@edge.example.com:41606?version=5#snell-node"* ]] || fail "Snell info output should contain sing-box URI: $info_output"
+[[ $info_output == *"snell-node = snell, edge.example.com, 41606, psk=new-psk, version=5"* ]] || fail "Snell info output should contain Surge config: $info_output"
+
+# URL command check for Snell
 url_output=$( (url_qr url snell-41606.json) 2>&1 )
 url_status=$?
-[[ $url_status != 0 ]] || fail "Snell URL command unexpectedly succeeded"
-[[ $url_output == *'Snell 暂不支持通用分享链接，请使用配置参数导入'* ]] || fail "Snell URL command should show parameter-import guidance"
+[[ $url_status == 0 ]] || fail "Snell URL command should succeed: $url_output"
+[[ $url_output == *"snell://new-psk@edge.example.com:41606?version=5#snell-node"* ]] || fail "Snell URL command should output sing-box URI"
+[[ $url_output == *"snell-node = snell, edge.example.com, 41606, psk=new-psk, version=5"* ]] || fail "Snell URL command should output Surge config"
 
-qr_output=$( (url_qr qr snell-41606.json) 2>&1 )
-qr_status=$?
-[[ $qr_status != 0 ]] || fail "Snell QR command unexpectedly succeeded"
-[[ $qr_output == *'Snell 暂不支持通用分享链接，请使用配置参数导入'* ]] || fail "Snell QR command should show parameter-import guidance"
-[[ $url_output != *'snell://'* ]] || fail "Snell URL output must not contain a snell:// URL"
-[[ $qr_output != *'snell://'* ]] || fail "Snell QR output must not contain a snell:// URL"
+# QR command check for Snell (explicitly unsupported)
+qr_output=$( (url_qr qr snell-41606.json) 2>&1 || true )
+[[ $qr_output == *"Snell 不支持二维码生成，请使用 URL 链接或 Surge 配置"* ]] || fail "Snell QR command should show unsupported message: $qr_output"
+
+# Test http obfs link and config
+(change snell-41606.json obfs http) >/dev/null 2>&1 || fail "change obfs to http should succeed"
+url_http_out=$( (url_qr url snell-41606.json) 2>&1 )
+[[ $url_http_out == *"snell://new-psk@edge.example.com:41606?version=5&obfs=http#snell-node"* ]] || fail "Snell URL command with http obfs should have &obfs=http: $url_http_out"
+[[ $url_http_out == *"snell-node = snell, edge.example.com, 41606, psk=new-psk, version=5, obfs=http"* ]] || fail "Snell Surge config with http obfs should have , obfs=http: $url_http_out"
 
 del snell-41606.json
 [[ ! -e "$is_conf_dir/snell-41606.json" ]] || fail "Snell delete should remove the node JSON"

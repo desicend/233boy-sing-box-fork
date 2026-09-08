@@ -2078,6 +2078,7 @@ get() {
 # show info
 info() {
     local info_target=${1:-${is_config_file:-$is_config_name}}
+    is_surge_str=
     if [[ $info_target ]]; then
         get info "$info_target"
     elif [[ ! $is_protocol ]]; then
@@ -2185,7 +2186,14 @@ info() {
         is_can_change=(0 1 13 14 15 17 18 19)
         is_info_show=(0 1 2 22 23 24)
         is_info_str=("$is_protocol" "$is_addr" "$port" "$snell_version" "$snell_psk" "$snell_obfs_mode")
-        is_url=
+        local obfs_param=
+        local surge_obfs=
+        if [[ $snell_obfs_mode && $snell_obfs_mode != "none" ]]; then
+            obfs_param="&obfs=$snell_obfs_mode"
+            surge_obfs=", obfs=$snell_obfs_mode"
+        fi
+        is_url="snell://$snell_psk@$is_addr:$port?version=$snell_version${obfs_param}#$is_node_name"
+        is_surge_str="$is_node_name = snell, $is_addr, $port, psk=$snell_psk, version=$snell_version${surge_obfs}"
         ;;
     direct)
         is_can_change=(0 1 7 8 13 14 15 16)
@@ -2217,6 +2225,10 @@ info() {
             warn "某些客户端如(V2rayN 等)导入URL需手动将: 跳过证书验证(allowInsecure) 设置为 true, 或打开: 允许不安全的连接"
         }
     fi
+    if [[ $is_surge_str ]]; then
+        msg "------------- Surge 配置 -------------"
+        msg "\e[${is_color}m${is_surge_str}\e[0m"
+    fi
     if [[ $is_no_auto_tls ]]; then
         msg "------------- no-auto-tls INFO -------------"
         msg "端口(port): $port"
@@ -2230,21 +2242,26 @@ info() {
 footer_msg() {
     [[ $is_core_stop && ! $is_new_json ]] && warn "$is_core_name 当前处于停止状态."
     [[ $is_caddy_stop && $host ]] && warn "Caddy 当前处于停止状态."
+    return 0
 }
 
 # URL or qrcode
 url_qr() {
     is_dont_show_info=1
     info $2
-    if [[ $is_protocol == snell ]]; then
-        err "Snell 暂不支持通用分享链接，请使用配置参数导入"
+    if [[ $1 == 'qr' && $is_protocol == snell ]]; then
+        err "Snell 不支持二维码生成，请使用 URL 链接或 Surge 配置"
     fi
     if [[ $is_url ]]; then
-        [[ $1 == 'url' ]] && {
+        if [[ $1 == 'url' ]]; then
             msg "\n------------- $is_config_name & URL 链接 -------------"
             msg "\n\e[${is_color}m${is_url}\e[0m\n"
+            if [[ $is_surge_str ]]; then
+                msg "------------- Surge 配置 -------------"
+                msg "\n\e[${is_color}m${is_surge_str}\e[0m\n"
+            fi
             footer_msg
-        } || {
+        else
             link="https://233boy.github.io/tools/qr.html#${is_url}"
             msg "\n------------- $is_config_name & QR code 二维码 -------------"
             msg
@@ -2257,7 +2274,7 @@ url_qr() {
             msg "如果无法正常显示或识别, 请使用下面的链接来生成二维码:"
             msg "\n\e[4;${is_color}m${link}\e[0m\n"
             footer_msg
-        }
+        fi
     else
         [[ $1 == 'url' ]] && {
             err "($is_config_name) 无法生成 URL 链接."
