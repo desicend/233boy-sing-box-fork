@@ -126,6 +126,13 @@ jq -e '
 [[ $add_out == *"防火墙"* || $add_out == *"ACL"* ]] || fail "relay add should emit security warning"
 grep -q "restart" "$manage_log" || fail "manage restart should be called on successful add"
 
+# 1.1 Successful relay add with interactive Enter allocating auto port
+auto_add_out=$(printf "\n203.0.113.50\n20050\n" | (main relay add) 2>&1)
+[[ $auto_add_out == *"自动分配本地端口"* ]] || fail "relay add with Enter should output auto port message: $auto_add_out"
+auto_port=$(echo "$auto_add_out" | grep -o '自动分配本地端口: [0-9]\+' | awk '{print $2}')
+[[ -n $auto_port ]] || fail "failed to parse auto allocated port from: $auto_add_out"
+[[ -f "$is_conf_dir/relay-${auto_port}.json" ]] || fail "relay-${auto_port}.json should exist"
+
 # 2. IPv6 remote address
 (main relay add 10001 "2001:db8::1" 20001) >/dev/null 2>&1 || fail "relay add with IPv6 should succeed"
 [[ $(jq -r '.inbounds[0].override_address' "$is_conf_dir/relay-10001.json") == "2001:db8::1" ]] || fail "IPv6 remote address mismatch"

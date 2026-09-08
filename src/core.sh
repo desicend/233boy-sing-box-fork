@@ -2413,14 +2413,15 @@ relay_info_show() {
 relay_add() {
     local local_port=$1 remote_addr=$2 remote_port=$3
     if [[ ! $local_port ]]; then
-        ask string local_port "请输入本地监听端口 (输入 auto 自动生成):"
-    fi
-    if [[ $local_port == auto ]]; then
         while :; do
             get_port
             local_port=$tmp_port
             config_port_used "$local_port" || break
         done
+        local auto_port=$local_port
+        is_default_arg=$auto_port
+        ask string local_port "请输入本地监听端口 (直接回车自动生成):"
+        [[ $local_port == "$auto_port" ]] && msg "自动分配本地端口: $local_port"
     fi
     local_port=$(echo "$local_port" | tr -d ' ')
     [[ $(is_test port "$local_port") ]] || err "($local_port) 不是一个有效的端口."
