@@ -279,7 +279,7 @@ require_snell_support() {
     ((major > 1 || major == 1 && minor >= 14)) || err "当前 sing-box 版本 ($is_core_ver) 不支持 Snell, 请先升级 sing-box core 到 1.14.0 或更高版本."
 }
 
-snell_config_port_used() {
+config_port_used() {
     local wanted=$1 current=${2:-} file nullglob_was_set
     if shopt -q nullglob; then
         nullglob_was_set=1
@@ -306,6 +306,10 @@ snell_config_port_used() {
     return 1
 }
 
+snell_config_port_used() {
+    config_port_used "$@"
+}
+
 validate_snell() {
     local current_port
     require_snell_support
@@ -314,7 +318,7 @@ validate_snell() {
     if [[ $port != "$current_port" ]] && [[ $(is_test port_used "$port") ]]; then
         err "无法使用 ($port) 端口. $is_err_tips"
     fi
-    snell_config_port_used "$port" "${is_config_file:-}" && err "无法使用 ($port) 端口. $is_err_tips"
+    config_port_used "$port" "${is_config_file:-}" && err "无法使用 ($port) 端口. $is_err_tips"
     [[ $snell_psk ]] || err "Snell PSK 不能为空. $is_err_tips"
     snell_version_valid "$snell_version" || err "Snell 版本目前只支持 5. $is_err_tips"
     snell_obfs_mode_valid "$snell_obfs_mode" || err "Snell 混淆模式只支持 none 或 http. $is_err_tips"
@@ -2386,6 +2390,99 @@ is_main_menu() {
     esac
 }
 
+relay_warn_security() {
+    warn "当前中转未设置身份验证，请务必使用系统防火墙 (如 ufw / iptables) 或云服务商安全组 / 网络 ACL 限制访问来源，以防止端口被未授权滥用."
+}
+
+relay_info_show() {
+    local l_port=$1 r_addr=$2 r_port=$3
+    msg "type = direct"
+    msg "listen = ::"
+    msg "listen_port = $l_port"
+    msg "override_address = $r_addr"
+    msg "override_port = $r_port"
+    msg "network = tcp,udp"
+}
+
+relay_add() {
+    local local_port=$1 remote_addr=$2 remote_port=$3
+    if [[ ! $local_port ]]; then
+        ask string local_port "请输入本地监听端口 (输入 auto 自动生成):"
+    fi
+    if [[ $local_port == auto ]]; then
+        while :; do
+            get_port
+            local_port=$tmp_port
+            config_port_used "$local_port" || break
+        done
+    fi
+    local_port=$(echo "$local_port" | tr -d ' ')
+    [[ $(is_test port "$local_port") ]] || err "($local_port) 不是一个有效的端口."
+    [[ $(is_test port_used "$local_port") ]] && err "本地端口 ($local_port) 已被占用."
+    config_port_used "$local_port" && err "本地端口 ($local_port) 已被现有配置占用."
+
+    if [[ ! $remote_addr ]]; then
+        ask string remote_addr "请输入目标地址 (IPv4/IPv6/域名):"
+    fi
+    remote_addr=$(echo "$remote_addr" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [[ -n $remote_addr ]] || err "目标地址不能为空."
+
+    if [[ ! $remote_port ]]; then
+        ask string remote_port "请输入目标端口:"
+    fi
+    remote_port=$(echo "$remote_port" | tr -d ' ')
+    [[ $(is_test port "$remote_port") ]] || err "($remote_port) 不是一个有效的目标端口."
+
+    local relay_file="$is_conf_dir/relay-${local_port}.json"
+    local tmp_file
+    tmp_file=$(mktemp "$is_conf_dir/.relay-XXXXXX.json") || err "无法创建中转临时配置文件."
+
+    jq -n \
+        --arg tag "relay-${local_port}.json" \
+        --arg addr "$remote_addr" \
+        --argjson local_port "$local_port" \
+        --argjson remote_port "$remote_port" \
+        '{inbounds:[{tag:$tag,type:"direct",listen:"::",listen_port:$local_port,override_address:$addr,override_port:$remote_port}]}' > "$tmp_file" || {
+        rm -f "$tmp_file"
+        err "生成中转配置 JSON 失败."
+    }
+
+    if ! "$is_core_bin" check -c "$tmp_file" &>/dev/null; then
+        rm -f "$tmp_file"
+        err "中转配置校验失败."
+    fi
+
+    if ! mv -f "$tmp_file" "$relay_file"; then
+        rm -f "$tmp_file"
+        err "保存中转配置文件失败."
+    fi
+
+    if [[ -f $is_config_json ]]; then
+        if ! "$is_core_bin" check -c "$is_config_json" -C "$is_conf_dir" &>/dev/null; then
+            rm -f "$relay_file"
+            err "完整运行时配置校验失败，已取消安装该中转配置."
+        fi
+    fi
+
+    manage restart &
+    msg "\n$(_green '中转配置添加成功!')"
+    msg "------------------------------------------------"
+    relay_info_show "$local_port" "$remote_addr" "$remote_port"
+    msg "------------------------------------------------"
+    relay_warn_security
+}
+
+relay_main() {
+    case ${1:-} in
+    add)
+        relay_add "${@:2}"
+        ;;
+    *)
+        err "无法识别中转命令 (${1:-}), 正确用法: $is_core relay [add|list|info|delete]"
+        ;;
+    esac
+}
+
 # check prefer args, if not exist prefer args and show main menu
 main() {
     [[ ! $1 ]] && {
@@ -2541,6 +2638,9 @@ main() {
     h | help | --help)
         load help.sh
         show_help ${@:2}
+        ;;
+    relay)
+        relay_main "${@:2}"
         ;;
     *)
         is_try_change=1
