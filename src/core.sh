@@ -274,6 +274,10 @@ snell_mode_valid() {
     [[ $1 =~ ^(default|unshaped|unsafe-raw)$ ]]
 }
 
+snell_mode_desc() {
+    echo -e "\n------------- Snell v6 运行模式说明 (小白指南) -------------\n1. default    \e[92m[推荐]\e[0m   : 自动特征整型与动态填充，防封锁能力最强 (小白首选)\n2. unshaped   \e[96m[低延迟]\e[0m : 纯净直连无额外填充，延迟更低、更省流量 (适合游戏或中转)\n3. unsafe-raw \e[33m[极速]\e[0m   : 极高吞吐裸跑传输，无安全防御机制 (仅限内网专线或自建中转)\n-----------------------------------------------------------"
+}
+
 snell_obfs_mode_valid() {
     [[ $1 == none || $1 == http ]]
 }
@@ -1343,7 +1347,7 @@ change() {
             fi
             # interactive prompt for mode
             is_tmp_list=(default unshaped unsafe-raw)
-            ask list is_new_snell_mode "${is_tmp_list[*]}" "\n当前为 Snell v6 节点，请选择运行模式:\n"
+            ask list is_new_snell_mode "${is_tmp_list[*]}" "\n当前为 Snell v6 节点，请选择运行模式:\n$(snell_mode_desc)\n"
             snell_mode=$is_new_snell_mode
             add snell
             return
@@ -1401,7 +1405,7 @@ change() {
         [[ $is_new_snell_mode == auto ]] && is_new_snell_mode=default
         [[ ! $is_new_snell_mode ]] && {
             is_tmp_list=(default unshaped unsafe-raw)
-            ask list is_new_snell_mode "${is_tmp_list[*]}" "\n请选择 Snell v6 运行模式:\n"
+            ask list is_new_snell_mode "${is_tmp_list[*]}" "\n请选择 Snell v6 运行模式:\n$(snell_mode_desc)\n"
         }
         snell_mode_valid "$is_new_snell_mode" || err "Snell 运行模式只支持 default, unshaped 或 unsafe-raw. $is_err_tips"
         snell_mode=$is_new_snell_mode

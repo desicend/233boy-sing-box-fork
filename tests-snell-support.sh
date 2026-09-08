@@ -102,6 +102,10 @@ get_snell_psk() { printf '%s\n' generated-psk; }
 
 [[ " ${protocol_list[*]} " == *' Snell '* ]] || fail "protocol_list should include Snell"
 
+desc_out=$(snell_mode_desc)
+[[ $desc_out == *"default"* && $desc_out == *"unshaped"* && $desc_out == *"unsafe-raw"* ]] || fail "snell_mode_desc should describe all three modes"
+[[ $desc_out == *"小白首选"* ]] || fail "snell_mode_desc should contain beginner guidance"
+
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
   add snell 41601 supplied-psk 5
