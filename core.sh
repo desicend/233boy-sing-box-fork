@@ -2543,7 +2543,7 @@ relay_delete() {
 }
 
 relay_menu() {
-    is_tmp_list=("添加中转" "中转列表/信息" "删除中转" "返回主菜单")
+    is_tmp_list=("添加中转" "中转列表" "删除中转" "返回主菜单")
     ask list is_relay_action null "\n请选择中转管理操作:\n"
     case $REPLY in
     1)
@@ -2551,8 +2551,6 @@ relay_menu() {
         ;;
     2)
         relay_list
-        ask string local_port "请输入要查看的中转本地端口 (留空跳过):"
-        [[ $local_port ]] && relay_info "$local_port"
         ;;
     3)
         relay_delete

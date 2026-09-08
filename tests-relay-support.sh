@@ -214,6 +214,26 @@ if (main relay unknown) >/dev/null 2>&1; then
     fail "unknown relay subcommand should fail"
 fi
 
+# 13.1. relay_menu option 2 is 中转列表 and does not prompt for local_port
+(
+    ask() {
+        [[ "${is_tmp_list[1]}" == "中转列表" ]] || exit 2
+        [[ "${is_tmp_list[1]}" != "中转列表/信息" ]] || exit 3
+        REPLY=2
+    }
+    relay_menu
+) || fail "relay_menu option 2 should be 中转列表"
+
+menu_out=$(
+    (
+        ask() { REPLY=2; }
+        relay_menu
+    ) 2>&1
+)
+[[ $menu_out == *"中转列表"* ]] || fail "relay_menu option 2 should output relay list"
+[[ $menu_out != *"请输入要查看的中转本地端口"* ]] || fail "relay_menu option 2 should not prompt for local port"
+
+
 CASE
 }
 
