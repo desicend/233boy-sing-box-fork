@@ -265,7 +265,11 @@ get_snell_psk() {
 }
 
 snell_version_valid() {
-    [[ $1 == 5 ]]
+    [[ $1 == 5 || $1 == 6 ]]
+}
+
+snell_mode_valid() {
+    [[ $1 =~ ^(default|unshaped|unsafe-raw)$ ]]
 }
 
 snell_obfs_mode_valid() {
@@ -321,8 +325,13 @@ validate_snell() {
     fi
     config_port_used "$port" "${is_config_file:-}" && err "无法使用 ($port) 端口. $is_err_tips"
     [[ $snell_psk ]] || err "Snell PSK 不能为空. $is_err_tips"
-    snell_version_valid "$snell_version" || err "Snell 版本目前只支持 5. $is_err_tips"
-    snell_obfs_mode_valid "$snell_obfs_mode" || err "Snell 混淆模式只支持 none 或 http. $is_err_tips"
+    snell_version_valid "$snell_version" || err "Snell 版本只支持 5 或 6. $is_err_tips"
+    if [[ $snell_version == 6 ]]; then
+        ((${#snell_psk} >= 12 && ${#snell_psk} <= 255)) || err "Snell v6 PSK 长度必须在 12 到 255 字符之间. $is_err_tips"
+        snell_mode_valid "$snell_mode" || err "Snell 运行模式只支持 default, unshaped 或 unsafe-raw. $is_err_tips"
+    else
+        snell_obfs_mode_valid "$snell_obfs_mode" || err "Snell 混淆模式只支持 none 或 http. $is_err_tips"
+    fi
 }
 
 
@@ -835,13 +844,23 @@ create() {
         [[ $is_change || ! $json_str ]] && get protocol $2
         [[ $net == "reality" ]] && is_add_public_key=",outbounds:[{type:\"direct\"},{tag:\"public_key_$is_public_key\",type:\"direct\"}]"
         if [[ ${2,,} == snell ]]; then
-            is_new_json=$(jq -n \
-                --arg tag "$is_config_name" \
-                --arg psk "$snell_psk" \
-                --arg obfs_mode "$snell_obfs_mode" \
-                --argjson port "$port" \
-                --argjson version "$snell_version" \
-                '{inbounds:[{tag:$tag,type:"snell",listen:"::",listen_port:$port,version:$version,psk:$psk,obfs_mode:$obfs_mode}]}')
+            if [[ $snell_version == 6 ]]; then
+                is_new_json=$(jq -n \
+                    --arg tag "$is_config_name" \
+                    --argjson port "$port" \
+                    --arg psk "$snell_psk" \
+                    --arg mode "$snell_mode" \
+                    --argjson version 6 \
+                    '{inbounds:[{tag:$tag,type:"snell",listen:"::",listen_port:$port,version:$version,psk:$psk,mode:$mode}]}')
+            else
+                is_new_json=$(jq -n \
+                    --arg tag "$is_config_name" \
+                    --argjson port "$port" \
+                    --arg psk "$snell_psk" \
+                    --arg obfs_mode "$snell_obfs_mode" \
+                    --argjson version 5 \
+                    '{inbounds:[{tag:$tag,type:"snell",listen:"::",listen_port:$port,version:$version,psk:$psk,obfs_mode:$obfs_mode}]}')
+            fi
             is_snell_tmp_file=$(mktemp "$is_conf_dir/.snell-XXXXXX.json") || err "无法创建 Snell 临时配置文件."
             printf '%s\n' "$is_new_json" >"$is_snell_tmp_file"
             if ! "$is_core_bin" check -c "$is_snell_tmp_file" &>/dev/null; then
@@ -1721,8 +1740,14 @@ add() {
     if [[ ${is_new_protocol,,} == snell ]]; then
         [[ ! $port ]] && get_port && port=$tmp_port
         [[ ! $snell_psk ]] && snell_psk=$(get_snell_psk)
-        [[ ! $snell_version ]] && snell_version=5
-        [[ ! $snell_obfs_mode ]] && snell_obfs_mode=none
+        [[ ! $snell_version ]] && snell_version=6
+        if [[ $snell_version == 6 ]]; then
+            [[ ! $snell_mode ]] && snell_mode=default
+            unset snell_obfs_mode
+        else
+            [[ ! $snell_obfs_mode ]] && snell_obfs_mode=none
+            unset snell_mode
+        fi
         validate_snell
     fi
 

@@ -35,13 +35,26 @@ check)
         and (.inbounds[0].type == "snell")
         and (.inbounds[0].listen == "::")
         and (.inbounds[0].listen_port | type == "number")
-        and (.inbounds[0].version == 5)
         and ((.inbounds[0].psk | type) == "string")
-        and ((.inbounds[0].psk | length) > 0)
-        and (.inbounds[0].obfs_mode == "none" or .inbounds[0].obfs_mode == "http")
         and ((.inbounds[0] | has("tls")) | not)
         and ((.inbounds[0] | has("reality")) | not)
         and ((.inbounds[0] | has("transport")) | not)
+        and (
+            (
+                .inbounds[0].version == 6
+                and (.inbounds[0].mode == "default" or .inbounds[0].mode == "unshaped" or .inbounds[0].mode == "unsafe-raw")
+                and ((.inbounds[0].psk | length) >= 12)
+                and ((.inbounds[0].psk | length) <= 255)
+                and ((.inbounds[0] | has("obfs_mode")) | not)
+            )
+            or
+            (
+                .inbounds[0].version == 5
+                and (.inbounds[0].obfs_mode == "none" or .inbounds[0].obfs_mode == "http")
+                and ((.inbounds[0].psk | length) > 0)
+                and ((.inbounds[0] | has("mode")) | not)
+            )
+        )
     ' "$config" >/dev/null || exit 1
     [[ $(jq -r '.inbounds[0].psk' "$config") != reject-me ]] || exit 1
     ;;
@@ -105,17 +118,33 @@ jq -e '
     and .inbounds[0].obfs_mode == "none"
 ' "$config" >/dev/null || fail "explicit PSK Snell JSON has unexpected shape"
 
+# Test default Snell creation creates version 6 with mode default
 (
-  unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
+  unset snell_psk snell_version snell_obfs_mode snell_mode port is_config_file is_config_name
   add snell 41602
-) || fail "add snell with generated PSK should succeed"
-[[ $(jq -r '.inbounds[0].psk' "$is_conf_dir/snell-41602.json") == generated-psk ]] || fail "omitted PSK should use get_snell_psk"
+) || fail "add snell with default parameters should succeed"
+jq -e '
+    .inbounds[0].version == 6
+    and .inbounds[0].mode == "default"
+    and (.inbounds[0] | has("obfs_mode") | not)
+    and (.inbounds[0].psk | length >= 12)
+' "$is_conf_dir/snell-41602.json" >/dev/null || fail "default snell config should be v6 with mode default and no obfs_mode"
 
+# Test v6 PSK < 12 characters is rejected
 (
-  unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
-  add snell 41603 supplied-psk 6
-) >"$case_dir/snell-version.out" 2>&1 && fail "unsupported Snell version should fail"
-[[ ! -f $is_conf_dir/snell-41603.json ]] || fail "unsupported version should not create target file"
+  unset snell_psk snell_version snell_obfs_mode snell_mode port is_config_file is_config_name
+  add snell 41620 shortpsk 6
+) >"$case_dir/snell-short-psk.out" 2>&1 && fail "v6 PSK < 12 chars should fail"
+[[ ! -f $is_conf_dir/snell-41620.json ]] || fail "short PSK should not create config"
+
+# Test unsupported versions (e.g., version 4 and version 7) are rejected
+for bad_ver in 4 7; do
+  (
+    unset snell_psk snell_version snell_obfs_mode snell_mode port is_config_file is_config_name
+    add snell 41621 "valid-long-psk-123" "$bad_ver"
+  ) >"$case_dir/snell-bad-ver.out" 2>&1 && fail "version $bad_ver should fail"
+  [[ ! -f $is_conf_dir/snell-41621.json ]] || fail "unsupported version should not create config"
+done
 
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
