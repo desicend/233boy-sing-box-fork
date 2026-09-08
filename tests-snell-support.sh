@@ -338,6 +338,61 @@ change snell-41601.json snell-version 5 || fail "Snell version change should suc
 change snell-41601.json obfs none || fail "Snell obfs change should succeed"
 [[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == none ]] || fail "Snell obfs change was not saved"
 
+# Test change mode on v6 node
+change snell-41622.json mode unshaped || fail "change mode unshaped on v6 node should succeed"
+[[ $(jq -r '.inbounds[0].mode' "$is_conf_dir/snell-41622.json") == unshaped ]] || fail "v6 mode was not saved"
+
+# Test smart routing: change mode on v5 node routes to obfs
+change snell-41601.json mode http || fail "change mode on v5 node should route to obfs"
+[[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == http ]] || fail "v5 obfs was not updated via mode"
+change snell-41601.json mode none || fail "change mode none on v5 node should route to obfs"
+[[ $(jq -r '.inbounds[0].obfs_mode' "$is_conf_dir/snell-41601.json") == none ]] || fail "v5 obfs was not reset"
+
+# Test smart routing: change obfs with mode value on v6 node updates mode
+change snell-41622.json obfs unsafe-raw || fail "change obfs with unsafe-raw on v6 node should update mode"
+[[ $(jq -r '.inbounds[0].mode' "$is_conf_dir/snell-41622.json") == unsafe-raw ]] || fail "v6 mode was not updated via obfs"
+
+# Test smart routing: change obfs with none/http on v6 node adapts to default mode
+change snell-41622.json obfs http || fail "change obfs with http on v6 node should adapt"
+[[ $(jq -r '.inbounds[0].mode' "$is_conf_dir/snell-41622.json") == default ]] || fail "v6 mode was not adapted to default"
+
+# Test v6 PSK change rejects < 12 characters
+(change snell-41622.json psk tooshort) >"$case_dir/v6-short-psk.out" 2>&1 && fail "v6 PSK change < 12 chars should fail"
+[[ $(jq -r '.inbounds[0].psk' "$is_conf_dir/snell-41622.json") == "test-psk-12345678" ]] || fail "failed PSK change altered PSK"
+
+# Test migration v5 -> v6
+jq -n \
+  '{inbounds:[{tag:"snell-41624.json",type:"snell",listen:"::",listen_port:41624,version:5,psk:"long-enough-psk-1234",obfs_mode:"http"}]}' \
+  >"$is_conf_dir/snell-41624.json"
+change snell-41624.json snell-version 6 || fail "migration v5 to v6 should succeed"
+jq -e '
+    .inbounds[0].version == 6
+    and .inbounds[0].mode == "default"
+    and (.inbounds[0] | has("obfs_mode") | not)
+    and .inbounds[0].psk == "long-enough-psk-1234"
+' "$is_conf_dir/snell-41624.json" >/dev/null || fail "v5 -> v6 migration output invalid"
+
+# Test migration v6 -> v5
+change snell-41624.json snell-version 5 || fail "migration v6 to v5 should succeed"
+jq -e '
+    .inbounds[0].version == 5
+    and .inbounds[0].obfs_mode == "none"
+    and (.inbounds[0] | has("mode") | not)
+    and .inbounds[0].psk == "long-enough-psk-1234"
+' "$is_conf_dir/snell-41624.json" >/dev/null || fail "v6 -> v5 migration output invalid"
+
+# Test migration v5 -> v6 with short PSK generates new valid PSK
+jq -n \
+  '{inbounds:[{tag:"snell-41625.json",type:"snell",listen:"::",listen_port:41625,version:5,psk:"short",obfs_mode:"http"}]}' \
+  >"$is_conf_dir/snell-41625.json"
+change snell-41625.json snell-version 6 || fail "migration v5 to v6 with short PSK should succeed"
+jq -e '
+    .inbounds[0].version == 6
+    and .inbounds[0].mode == "default"
+    and (.inbounds[0] | has("obfs_mode") | not)
+    and (.inbounds[0].psk | length >= 12)
+' "$is_conf_dir/snell-41625.json" >/dev/null || fail "v5 -> v6 migration with short PSK output invalid"
+
 if ! (TEST_ACTIVE_PORT=41601 change snell-41601.json port 41601 >/dev/null 2>&1); then
   fail "same-port Snell change should ignore the current active listener"
 fi

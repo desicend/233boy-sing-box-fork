@@ -174,6 +174,7 @@ change_list=(
     "更改 PSK"
     "更改 Snell 版本"
     "更改 Snell 混淆模式"
+    "更改 Snell 运行模式"
 )
 outbound_mode_list=(
     "V6优先"
@@ -1013,7 +1014,7 @@ change() {
         name | rename)
             is_change_id=13
             ;;
-        outbound | outbound-mode | mode)
+        outbound | outbound-mode)
             is_change_id=14
             ;;
         entry | entry-addr | entry_addr | addr)
@@ -1030,6 +1031,9 @@ change() {
             ;;
         obfs | obfs-mode | obfs_mode)
             is_change_id=19
+            ;;
+        mode | snell-mode)
+            is_change_id=20
             ;;
         *)
             [[ $is_try_change ]] && return
@@ -1284,23 +1288,65 @@ change() {
         info
         ;;
     17)
+        # psk
         [[ $is_protocol == snell ]] || err "($is_config_file) 不支持更改 Snell PSK."
         is_new_snell_psk=$3
         [[ $is_auto ]] && is_new_snell_psk=$(get_snell_psk)
         [[ ! $is_new_snell_psk ]] && ask string is_new_snell_psk "请输入新的 Snell PSK:"
+        if [[ $snell_version == 6 ]]; then
+            ((${#is_new_snell_psk} >= 12 && ${#is_new_snell_psk} <= 255)) || err "Snell v6 PSK 长度必须在 12 到 255 字符之间. $is_err_tips"
+        fi
         snell_psk=$is_new_snell_psk
         add snell
         ;;
     18)
+        # snell-version
         [[ $is_protocol == snell ]] || err "($is_config_file) 不支持更改 Snell 版本."
         is_new_snell_version=$3
-        [[ $is_auto ]] && is_new_snell_version=5
-        [[ ! $is_new_snell_version ]] && ask string is_new_snell_version "请输入新的 Snell 版本:"
+        [[ $is_auto ]] && is_new_snell_version=6
+        [[ ! $is_new_snell_version ]] && {
+            ask string is_new_snell_version "请输入新的 Snell 版本 [5/6]:"
+        }
+        snell_version_valid "$is_new_snell_version" || err "Snell 版本只支持 5 或 6. $is_err_tips"
+        if [[ $is_new_snell_version == 6 && $snell_version != 6 ]]; then
+            # migrating v5 -> v6
+            unset snell_obfs_mode
+            snell_mode=default
+            if ((${#snell_psk} < 12)); then
+                warn "原 PSK 长度不足 12 位，已自动生成符合 v6 规范的新 PSK."
+                snell_psk=$(get_snell_psk)
+            fi
+        elif [[ $is_new_snell_version == 5 && $snell_version != 5 ]]; then
+            # migrating v6 -> v5
+            unset snell_mode
+            snell_obfs_mode=none
+        fi
         snell_version=$is_new_snell_version
         add snell
         ;;
     19)
+        # obfs-mode
         [[ $is_protocol == snell ]] || err "($is_config_file) 不支持更改 Snell 混淆模式."
+        if [[ $snell_version == 6 ]]; then
+            # smart routing for v6 node
+            if [[ $3 =~ ^(default|unshaped|unsafe-raw)$ ]]; then
+                snell_mode=$3
+                add snell
+                return
+            fi
+            if [[ $3 == 'none' || $3 == 'http' ]]; then
+                warn "当前为 Snell v6 节点，不支持混淆模式 (obfs_mode)，已自动转换为默认运行模式 (mode: default)."
+                snell_mode=default
+                add snell
+                return
+            fi
+            # interactive prompt for mode
+            is_tmp_list=(default unshaped unsafe-raw)
+            ask list is_new_snell_mode "${is_tmp_list[*]}" "\n当前为 Snell v6 节点，请选择运行模式:\n"
+            snell_mode=$is_new_snell_mode
+            add snell
+            return
+        fi
         is_new_snell_obfs_mode=$3
         [[ $is_new_snell_obfs_mode == auto ]] && is_new_snell_obfs_mode=none
         [[ ! $is_new_snell_obfs_mode ]] && {
@@ -1308,6 +1354,49 @@ change() {
             ask list is_new_snell_obfs_mode
         }
         snell_obfs_mode=$is_new_snell_obfs_mode
+        add snell
+        ;;
+    20)
+        # mode
+        if [[ $is_protocol != snell ]]; then
+            # backward compatibility for non-snell outbound mode
+            ask set_outbound_mode
+            if [[ $is_outbound_mode == 'SS 出站' ]]; then
+                ask string is_outbound_ss_uri "请输入 SS 节点链接:"
+                parse_ss_uri_for_outbound "$is_outbound_ss_uri" || err "SS 节点链接格式无效, 目前仅支持 ss://BASE64(method:password)@host:port#name"
+                meta_set "$is_config_file" outbound_ss_server "$is_outbound_ss_server"
+                meta_set "$is_config_file" outbound_ss_port "$is_outbound_ss_port"
+                meta_set "$is_config_file" outbound_ss_method "$is_outbound_ss_method"
+                meta_set "$is_config_file" outbound_ss_password "$is_outbound_ss_password"
+                meta_set "$is_config_file" outbound_ss_name "$is_outbound_ss_name"
+            fi
+            meta_set "$is_config_file" outbound_mode "$is_outbound_mode"
+            [[ -f "$is_config_json" ]] || create config.json
+            sync_runtime_node_outbound_modes
+            manage restart &
+            msg "\n已更新出站方式为: $(_green $(current_outbound_mode_display "$is_config_file"))\n"
+            return
+        fi
+        if [[ $snell_version == 5 ]]; then
+            # smart routing for v5 node
+            is_new_snell_obfs_mode=$3
+            [[ $is_new_snell_obfs_mode == auto ]] && is_new_snell_obfs_mode=none
+            if [[ ! $is_new_snell_obfs_mode || ! $is_new_snell_obfs_mode =~ ^(none|http)$ ]]; then
+                is_tmp_list=(none http)
+                ask list is_new_snell_obfs_mode "${is_tmp_list[*]}" "\n当前为 Snell v5 节点，请选择混淆模式:\n"
+            fi
+            snell_obfs_mode=$is_new_snell_obfs_mode
+            add snell
+            return
+        fi
+        is_new_snell_mode=$3
+        [[ $is_new_snell_mode == auto ]] && is_new_snell_mode=default
+        [[ ! $is_new_snell_mode ]] && {
+            is_tmp_list=(default unshaped unsafe-raw)
+            ask list is_new_snell_mode "${is_tmp_list[*]}" "\n请选择 Snell v6 运行模式:\n"
+        }
+        snell_mode_valid "$is_new_snell_mode" || err "Snell 运行模式只支持 default, unshaped 或 unsafe-raw. $is_err_tips"
+        snell_mode=$is_new_snell_mode
         add snell
         ;;
     16)
