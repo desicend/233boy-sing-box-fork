@@ -123,6 +123,7 @@ mainmenu=(
     "帮助"
     "其他"
     "关于"
+    "中转管理"
 )
 info_list=(
     "协议 (protocol)"
@@ -2387,6 +2388,9 @@ is_main_menu() {
         load help.sh
         about
         ;;
+    11)
+        relay_menu
+        ;;
     esac
 }
 
@@ -2537,6 +2541,27 @@ relay_delete() {
     _green "\n已删除中转配置: relay-${local_port}.json\n"
 }
 
+relay_menu() {
+    is_tmp_list=("添加中转" "中转列表/信息" "删除中转" "返回主菜单")
+    ask list is_relay_action null "\n请选择中转管理操作:\n"
+    case $REPLY in
+    1)
+        relay_add
+        ;;
+    2)
+        relay_list
+        ask string local_port "请输入要查看的中转本地端口 (留空跳过):"
+        [[ $local_port ]] && relay_info "$local_port"
+        ;;
+    3)
+        relay_delete
+        ;;
+    4)
+        is_main_menu
+        ;;
+    esac
+}
+
 relay_main() {
     case ${1:-} in
     add)
@@ -2551,8 +2576,11 @@ relay_main() {
     del | delete | rm)
         relay_delete "${@:2}"
         ;;
+    "")
+        relay_menu
+        ;;
     *)
-        err "无法识别中转命令 (${1:-}), 正确用法: $is_core relay [add|list|info|delete]"
+        err "无法识别中转命令 ($1), 正确用法: $is_core relay [add|list|info|delete]"
         ;;
     esac
 }

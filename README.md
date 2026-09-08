@@ -18,6 +18,7 @@
 - 一键添加 Hysteria2
 - 一键添加 AnyTLS
 - 一键添加 Snell v5
+- 一键添加端口中转 (原生 direct, 支持 TCP/UDP)
 - 一键添加 Shadowsocks 2022
 - 一键添加 VMess-(TCP/HTTP/QUIC)
 - 一键添加 VMess-(WS/H2/HTTPUpgrade)-TLS
@@ -101,6 +102,15 @@ Usage: sing-box [options]... [args]...
    fix-caddyfile                                   修复 Caddyfile
    fix-config.json                                 修复 config.json
    import                                          导入 sing-box/v2ray 脚本配置
+
+中转:
+   relay add [local-port] [remote-addr] [remote-port]   添加中转 (sing-box 原生 direct, 支持 TCP/UDP)
+   relay list                                           中转列表
+   relay info [local-port]                              查看中转详情
+   relay delete [local-port]                            删除中转
+   中转管理亦可通过主菜单交互操作
+   中转无内置认证，请务必使用防火墙或网络 ACL 限制来源
+   中转不生成分享链接或二维码
 
 管理:
    un, uninstall                                   卸载

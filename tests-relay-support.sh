@@ -201,10 +201,32 @@ restart_count_after=$(grep -c "restart" "$manage_log" || true)
 (( restart_count_after > restart_count_before )) || fail "manage restart should be called on delete"
 [[ -f "$is_conf_dir/relay-10001.json" ]] || fail "other relay files should not be deleted"
 
+# 13. mainmenu item 11 is 中转管理 and unknown subcommand fails
+[[ "${mainmenu[10]}" == "中转管理" ]] || fail "mainmenu item 11 must be 中转管理"
+if (main relay unknown) >/dev/null 2>&1; then
+    fail "unknown relay subcommand should fail"
+fi
+
 CASE
 }
 
 run_core_case "$repo_root/core.sh"
 run_core_case "$repo_root/src/core.sh"
 
-echo "PASS: Task 2 relay list, info, delete, and fix-all coverage"
+# 14. documentation checks
+grep -q 'relay add \[local-port\] \[remote-addr\] \[remote-port\]' "$repo_root/src/help.sh" || fail "help.sh missing relay add"
+grep -q 'relay list' "$repo_root/src/help.sh" || fail "help.sh missing relay list"
+grep -q 'relay info \[local-port\]' "$repo_root/src/help.sh" || fail "help.sh missing relay info"
+grep -q 'relay delete \[local-port\]' "$repo_root/src/help.sh" || fail "help.sh missing relay delete"
+grep -q '防火墙' "$repo_root/src/help.sh" || fail "help.sh missing firewall warning"
+grep -q 'ACL' "$repo_root/src/help.sh" || fail "help.sh missing ACL warning"
+
+grep -q 'relay add \[local-port\] \[remote-addr\] \[remote-port\]' "$repo_root/README.md" || fail "README missing relay add"
+grep -q 'relay list' "$repo_root/README.md" || fail "README missing relay list"
+grep -q 'relay info \[local-port\]' "$repo_root/README.md" || fail "README missing relay info"
+grep -q 'relay delete \[local-port\]' "$repo_root/README.md" || fail "README missing relay delete"
+grep -q '防火墙' "$repo_root/README.md" || fail "README missing firewall warning"
+grep -q 'ACL' "$repo_root/README.md" || fail "README missing ACL warning"
+grep -q '中转管理' "$repo_root/README.md" || fail "README missing interactive relay entry"
+
+echo "PASS: Task 3 interactive menu and documentation coverage"
