@@ -1,6 +1,6 @@
 # 介绍
 
-最好用的 sing-box 一键安装脚本 & 管理脚本
+最好用的 sing-box 一键安装脚本 & 管理脚本，支持主流代理协议节点搭建与原生高性能端口中转
 
 # 特点
 
@@ -17,8 +17,9 @@
 - 一键添加 Trojan
 - 一键添加 Hysteria2
 - 一键添加 AnyTLS
-- 一键添加 Snell v5
-- 一键添加端口中转 (原生 direct, 支持 TCP/UDP)
+- 一键添加 Snell v5 (支持双格式导出 sing-box URI 链接与 Surge 代理配置)
+- 一键添加端口中转 (原生 direct 极速转发, 支持 TCP/UDP 双协议, 回车自动分配端口)
+- 支持交互式主菜单与快捷命令行双模式管理 (直接运行 sing-box 即可操作)
 - 一键添加 Shadowsocks 2022
 - 一键添加 VMess-(TCP/HTTP/QUIC)
 - 一键添加 VMess-(WS/H2/HTTPUpgrade)-TLS
@@ -26,7 +27,7 @@
 - 一键添加 Trojan-(WS/H2/HTTPUpgrade)-TLS
 - 一键启用 BBR
 - 一键更改伪装网站
-- 一键更改 (端口/UUID/密码/域名/路径/加密方式/SNI/等...)
+- 一键更改 (端口/UUID/密码/域名/路径/加密方式/SNI/PSK/混淆等...)
 - 还有更多...
 
 # 设计理念
