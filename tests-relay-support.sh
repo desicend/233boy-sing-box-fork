@@ -102,6 +102,7 @@ is_core_bin="$FAKE_CORE"
 is_core_ver=1.14.0
 is_dont_show_info=1
 is_dont_auto_exit=1
+export ip=203.0.113.10 is_dont_get_ip=1
 mkdir -p "$is_conf_dir"
 manage_log="$case_dir/manage.log"
 : >"$manage_log"
@@ -132,6 +133,14 @@ auto_add_out=$(printf "\n203.0.113.50\n20050\n" | (main relay add) 2>&1)
 auto_port=$(echo "$auto_add_out" | grep -o '自动分配本地端口: [0-9]\+' | awk '{print $2}')
 [[ -n $auto_port ]] || fail "failed to parse auto allocated port from: $auto_add_out"
 [[ -f "$is_conf_dir/relay-${auto_port}.json" ]] || fail "relay-${auto_port}.json should exist"
+
+# 1.2 Interactive relay add with manually typed port (even matching auto port candidate) must not emit auto allocation message
+(
+    get_port() { tmp_port=10003; }
+    manual_typed_out=$(printf "10003\n203.0.113.51\n20051\n" | (main relay add) 2>&1)
+    [[ $manual_typed_out != *"自动分配本地端口"* ]] || exit 10
+    [[ -f "$is_conf_dir/relay-10003.json" ]] || exit 11
+) || fail "relay add with manually typed port should not emit auto allocation message even if matching auto_port"
 
 # 2. IPv6 remote address
 (main relay add 10001 "2001:db8::1" 20001) >/dev/null 2>&1 || fail "relay add with IPv6 should succeed"

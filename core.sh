@@ -2436,7 +2436,7 @@ relay_add() {
         local auto_port=$local_port
         is_default_arg=$auto_port
         ask string local_port "请输入本地监听端口 (直接回车自动生成):"
-        [[ $local_port == "$auto_port" ]] && msg "自动分配本地端口: $local_port"
+        [[ -z "$REPLY" ]] && msg "自动分配本地端口: $local_port"
     fi
     local_port=$(echo "$local_port" | tr -d ' ')
     [[ $(is_test port "$local_port") ]] || err "($local_port) 不是一个有效的端口."

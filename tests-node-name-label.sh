@@ -15,6 +15,7 @@ manage() { :; }
 is_conf_dir="$workdir/conf"
 is_config_json="$workdir/config.json"
 is_dont_auto_exit=1
+export ip=203.0.113.10 is_dont_get_ip=1
 mkdir -p "$is_conf_dir/.quan-meta"
 
 cat > "$is_conf_dir/demo.json" <<'EOF'
