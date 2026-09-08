@@ -151,6 +151,7 @@ info_list=(
     "版本 (version)"
     "PSK"
     "混淆模式 (obfs_mode)"
+    "运行模式 (mode)"
 )
 change_list=(
     "更改协议"
@@ -1848,9 +1849,9 @@ get() {
         get file $2
         if [[ $is_config_file ]]; then
             is_json_str=$(json_strip_comments "$is_conf_dir/$is_config_file")
-            is_json_data=$(jq -r '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag,.inbounds[0].version,.inbounds[0].psk,.inbounds[0].obfs_mode)' <<<$is_json_str)
+            is_json_data=$(jq -r '(.inbounds[0]|.type,.listen_port,.listen,(.users[0]|.uuid,.password,.username),.method,.password,.override_port,.override_address,(.transport|.type,.path,.headers.host),(.tls|.server_name,.reality.private_key)),(.outbounds[1].tag,.inbounds[0].version,.inbounds[0].psk,.inbounds[0].obfs_mode,.inbounds[0].mode)' <<<$is_json_str)
             [[ $? != 0 ]] && err "无法读取此文件: $is_config_file"
-            is_up_var_set=(null is_protocol port is_listen_addr uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key snell_version snell_psk snell_obfs_mode)
+            is_up_var_set=(null is_protocol port is_listen_addr uuid password username ss_method ss_password door_port door_addr net_type path host is_servername is_private_key is_public_key snell_version snell_psk snell_obfs_mode snell_mode)
             [[ $is_debug ]] && msg "\n------------- debug: $is_config_file -------------"
             mapfile -t is_json_data_list <<<"$is_json_data"
             i=0
@@ -1970,8 +1971,14 @@ get() {
         snell*)
             net=snell
             is_protocol=snell
-            [[ $snell_version ]] || snell_version=5
-            [[ $snell_obfs_mode ]] || snell_obfs_mode=none
+            [[ $snell_version ]] || snell_version=6
+            if [[ $snell_version == 6 ]]; then
+                [[ $snell_mode ]] || snell_mode=default
+                unset snell_obfs_mode
+            else
+                [[ $snell_obfs_mode ]] || snell_obfs_mode=none
+                unset snell_mode
+            fi
             ;;
         *)
             err "无法识别协议: $is_config_file"
@@ -2210,17 +2217,31 @@ info() {
         fi
         ;;
     snell)
-        is_can_change=(0 1 13 14 15 17 18 19)
-        is_info_show=(0 1 2 22 23 24)
-        is_info_str=("$is_protocol" "$is_addr" "$port" "$snell_version" "$snell_psk" "$snell_obfs_mode")
-        local obfs_param=
-        local surge_obfs=
-        if [[ $snell_obfs_mode && $snell_obfs_mode != "none" ]]; then
-            obfs_param="&obfs=$snell_obfs_mode"
-            surge_obfs=", obfs=$snell_obfs_mode"
+        if [[ $snell_version == 6 ]]; then
+            is_can_change=(0 1 13 14 15 17 18 20)
+            is_info_show=(0 1 2 22 23 25)
+            is_info_str=("$is_protocol" "$is_addr" "$port" "$snell_version" "$snell_psk" "$snell_mode")
+            local mode_param=
+            local surge_mode=
+            if [[ $snell_mode && $snell_mode != "default" ]]; then
+                mode_param="&mode=$snell_mode"
+                surge_mode=", mode=$snell_mode"
+            fi
+            is_url="snell://$snell_psk@$is_addr:$port?version=$snell_version${mode_param}#$is_node_name"
+            is_surge_str="$is_node_name = snell, $is_addr, $port, psk=$snell_psk, version=$snell_version${surge_mode}"
+        else
+            is_can_change=(0 1 13 14 15 17 18 19)
+            is_info_show=(0 1 2 22 23 24)
+            is_info_str=("$is_protocol" "$is_addr" "$port" "$snell_version" "$snell_psk" "$snell_obfs_mode")
+            local obfs_param=
+            local surge_obfs=
+            if [[ $snell_obfs_mode && $snell_obfs_mode != "none" ]]; then
+                obfs_param="&obfs=$snell_obfs_mode"
+                surge_obfs=", obfs=$snell_obfs_mode"
+            fi
+            is_url="snell://$snell_psk@$is_addr:$port?version=$snell_version${obfs_param}#$is_node_name"
+            is_surge_str="$is_node_name = snell, $is_addr, $port, psk=$snell_psk, version=$snell_version${surge_obfs}"
         fi
-        is_url="snell://$snell_psk@$is_addr:$port?version=$snell_version${obfs_param}#$is_node_name"
-        is_surge_str="$is_node_name = snell, $is_addr, $port, psk=$snell_psk, version=$snell_version${surge_obfs}"
         ;;
     direct)
         is_can_change=(0 1 7 8 13 14 15 16)

@@ -257,6 +257,48 @@ done
 is_dont_show_info=1
 is_dont_auto_exit=$old_is_dont_auto_exit
 
+# Test v6 default mode info and export formats
+jq -n \
+  '{inbounds:[{tag:"snell-41622.json",type:"snell",listen:"::",listen_port:41622,version:6,psk:"test-psk-12345678",mode:"default"}]}' \
+  >"$is_conf_dir/snell-41622.json"
+jq -n '{node_name:"snell-v6-node",entry_addr:"v6.example.com",outbound_mode:"V4优先"}' \
+  >"$is_conf_dir/.quan-meta/snell-41622.json.meta.json"
+
+is_dont_show_info=1
+info snell-41622.json
+[[ $is_protocol == snell ]] || fail "info should identify Snell protocol"
+[[ $port == 41622 ]] || fail "info should extract Snell port"
+[[ $snell_version == 6 ]] || fail "info should extract Snell v6 version"
+[[ $snell_mode == default ]] || fail "info should extract Snell mode default"
+[[ $snell_psk == "test-psk-12345678" ]] || fail "info should extract Snell PSK"
+[[ $is_url == "snell://test-psk-12345678@v6.example.com:41622?version=6#snell-v6-node" ]] || fail "Snell v6 default URI mismatch: $is_url"
+[[ $is_surge_str == "snell-v6-node = snell, v6.example.com, 41622, psk=test-psk-12345678, version=6" ]] || fail "Snell v6 default Surge mismatch: $is_surge_str"
+
+# Test v6 unshaped mode exports &mode=unshaped
+jq -n \
+  '{inbounds:[{tag:"snell-41623.json",type:"snell",listen:"::",listen_port:41623,version:6,psk:"test-psk-12345678",mode:"unshaped"}]}' \
+  >"$is_conf_dir/snell-41623.json"
+jq -n '{node_name:"snell-v6-unshaped",entry_addr:"v6.example.com",outbound_mode:"V4优先"}' \
+  >"$is_conf_dir/.quan-meta/snell-41623.json.meta.json"
+
+is_dont_show_info=1
+info snell-41623.json
+[[ $snell_mode == unshaped ]] || fail "info should extract unshaped mode"
+[[ $is_url == "snell://test-psk-12345678@v6.example.com:41623?version=6&mode=unshaped#snell-v6-unshaped" ]] || fail "v6 unshaped URI mismatch: $is_url"
+[[ $is_surge_str == "snell-v6-unshaped = snell, v6.example.com, 41623, psk=test-psk-12345678, version=6, mode=unshaped" ]] || fail "v6 unshaped Surge mismatch: $is_surge_str"
+
+# Test v6 terminal info output contains 运行模式 (mode)
+old_is_dont_auto_exit=$is_dont_auto_exit
+is_dont_show_info=
+is_dont_auto_exit=
+v6_info_output=$(info snell-41622.json)
+for label in "协议 (protocol)" "版本 (version)" "PSK" "运行模式 (mode)"; do
+  [[ $v6_info_output == *"$label"* ]] || fail "Snell v6 info output should include $label"
+done
+[[ $v6_info_output != *"混淆模式 (obfs_mode)"* ]] || fail "Snell v6 info should not display obfs_mode"
+is_dont_show_info=1
+is_dont_auto_exit=$old_is_dont_auto_exit
+
 slash_psk='foo//bar'
 (
   unset snell_psk snell_version snell_obfs_mode port is_config_file is_config_name
